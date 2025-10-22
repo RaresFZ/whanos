@@ -1,0 +1,13 @@
+{{ registry_domain }} {
+  encode gzip
+
+  tls internal
+
+  basicauth * {
+{% for entry in registry_caddy_auth_entries | default([]) %}
+    {{ entry.username }} {{ entry.hash }}
+{% endfor %}
+  }
+
+  reverse_proxy registry:5000
+}

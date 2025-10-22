@@ -1,0 +1,5 @@
+---
+jenkins_env_file: /etc/default/jenkins
+jenkins_env_entries:
+  - regex: '^JAVA_ARGS='
+    line: 'JAVA_ARGS="-Djava.awt.headless=true -DCASC_JENKINS_CONFIG=/var/lib/jenkins/casc_configs/whanos.yaml -Djenkins.install.runSetupWizard=false"'

@@ -1,0 +1,10 @@
+# syntax=docker/dockerfile:1.6
+FROM whanos-c:latest
+
+WORKDIR /workspace
+
+COPY . .
+
+RUN make
+
+CMD ["./compiled-app"]

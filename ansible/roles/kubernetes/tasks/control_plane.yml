@@ -1,0 +1,80 @@
+---
+- name: Check if Kubernetes control plane already initialised
+  ansible.builtin.stat:
+    path: /etc/kubernetes/admin.conf
+  register: kubeadm_admin_conf
+
+- name: Gather network facts if not already present
+  ansible.builtin.setup:
+    gather_subset:
+      - network
+  when: ansible_default_ipv4 is not defined
+
+- name: Get primary network interface IP (fallback method)
+  ansible.builtin.shell: |
+    ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1' | head -n1
+  register: primary_ip_fallback
+  changed_when: false
+  when: ansible_default_ipv4.address is not defined or ansible_default_ipv4.address == '127.0.0.1'
+
+- name: Determine API server advertise address
+  ansible.builtin.set_fact:
+    k8s_advertise_address: "{{ ansible_default_ipv4.address | default(primary_ip_fallback.stdout | default('127.0.0.1')) }}"
+
+- name: Display advertise address
+  ansible.builtin.debug:
+    msg: "Using API server advertise address: {{ k8s_advertise_address }}"
+
+- name: Fail if advertise address is localhost
+  ansible.builtin.fail:
+    msg: "Cannot use 127.0.0.1 or localhost as API server address. Please set kubernetes_api_advertise_address to a valid IP."
+  when: k8s_advertise_address in ['127.0.0.1', 'localhost']
+
+- name: Initialise Kubernetes control plane
+  ansible.builtin.command: >
+    kubeadm init
+    --apiserver-advertise-address {{ k8s_advertise_address }}
+    --pod-network-cidr {{ kubernetes_pod_network_cidr }}
+    --service-cidr {{ kubernetes_service_cidr }}
+  when: not kubeadm_admin_conf.stat.exists
+
+- name: Ensure kubeconfig directory exists
+  ansible.builtin.file:
+    path: "{{ kubernetes_admin_home }}/.kube"
+    state: directory
+    owner: "{{ kubernetes_admin_user }}"
+    group: "{{ kubernetes_admin_user }}"
+    mode: "0700"
+
+- name: Copy admin kubeconfig for cluster admin
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: "{{ kubernetes_admin_home }}/.kube/config"
+    remote_src: true
+    owner: "{{ kubernetes_admin_user }}"
+    group: "{{ kubernetes_admin_user }}"
+    mode: "0600"
+
+- name: Install Calico CNI manifest
+  ansible.builtin.shell: |
+    set -euo pipefail
+    kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/{{ kubernetes_install_calico_version }}/manifests/calico.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: calico_apply
+  changed_when: "'created' in calico_apply.stdout or 'configured' in calico_apply.stdout"
+  when: not kubeadm_admin_conf.stat.exists
+
+- name: Generate join command for workers
+  ansible.builtin.command: kubeadm token create --print-join-command
+  register: join_command
+  changed_when: false
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+
+- name: Distribute join command to workers
+  ansible.builtin.set_fact:
+    kubernetes_join_command: "{{ join_command.stdout }}"
+  delegate_to: "{{ item }}"
+  delegate_facts: true
+  loop: "{{ groups['k8s_workers'] | default([]) }}"

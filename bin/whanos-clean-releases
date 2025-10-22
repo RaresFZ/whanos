@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""Prune old ReplicaSet revisions for a Whanos-managed application."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Tuple
+
+
+def run_kubectl(args: List[str], kubeconfig: Optional[str]) -> subprocess.CompletedProcess:
+    env = os.environ.copy()
+    if kubeconfig:
+        env["KUBECONFIG"] = kubeconfig
+    return subprocess.run(
+        ["kubectl", *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+
+def parse_arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Prune old ReplicaSets for a Whanos deployment."
+    )
+    parser.add_argument("--app", required=True, help="Application name.")
+    parser.add_argument(
+        "--namespace",
+        help="Namespace containing the deployment (default: whanos-<app>).",
+    )
+    parser.add_argument(
+        "--keep",
+        type=int,
+        default=2,
+        help="Number of newest ReplicaSets to keep (default: 2).",
+    )
+    parser.add_argument(
+        "--kubeconfig",
+        help="Path to kubeconfig (optional).",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show which ReplicaSets would be deleted without deleting them.",
+    )
+    return parser.parse_args()
+
+
+def parse_timestamp(ts: str) -> datetime:
+    return datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(timezone.utc)
+
+
+def select_replicasets(
+    replicasets: List[Dict], keep: int
+) -> Tuple[List[Dict], List[Dict]]:
+    sorted_rs = sorted(
+        replicasets,
+        key=lambda rs: parse_timestamp(rs["metadata"]["creationTimestamp"]),
+        reverse=True,
+    )
+    return sorted_rs[:keep], sorted_rs[keep:]
+
+
+def main() -> int:
+    args = parse_arguments()
+
+    namespace = args.namespace or f"whanos-{args.app}"
+
+    try:
+        result = run_kubectl(
+            [
+                "get",
+                "replicasets",
+                "-n",
+                namespace,
+                "-l",
+                f"app.kubernetes.io/name={args.app}",
+                "-o",
+                "json",
+            ],
+            args.kubeconfig,
+        )
+    except subprocess.CalledProcessError as exc:
+        sys.stderr.write(exc.stderr)
+        return exc.returncode
+
+    data = json.loads(result.stdout)
+    replicasets = data.get("items", [])
+
+    if not replicasets:
+        print(f"No ReplicaSets found for app '{args.app}' in namespace '{namespace}'.")
+        return 0
+
+    keep_rs, delete_rs = select_replicasets(replicasets, args.keep)
+
+    print(f"Keeping {len(keep_rs)} ReplicaSets:")
+    for rs in keep_rs:
+        print(f"  - {rs['metadata']['name']} ({rs['metadata']['creationTimestamp']})")
+
+    if not delete_rs:
+        print("No ReplicaSets to delete.")
+        return 0
+
+    print(f"Deleting {len(delete_rs)} ReplicaSets:")
+    for rs in delete_rs:
+        name = rs["metadata"]["name"]
+        created = rs["metadata"]["creationTimestamp"]
+        print(f"  - {name} ({created})")
+        if args.dry_run:
+            continue
+        run_kubectl(
+            ["delete", "rs", name, "-n", namespace],
+            args.kubeconfig,
+        )
+
+    if args.dry_run:
+        print("Dry run complete. No resources deleted.")
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,9 @@
+---
+kubernetes_version: "1.29.4-00"
+kubernetes_cri: containerd
+kubernetes_pod_network_cidr: "10.244.0.0/16"
+kubernetes_service_cidr: "10.96.0.0/12"
+kubernetes_api_advertise_address: "{{ ansible_host | default(ansible_default_ipv4.address | default('127.0.0.1')) }}"
+kubernetes_admin_user: "{{ ansible_env.SUDO_USER | default(ansible_env.USER | default(ansible_user | default('root'))) }}"
+kubernetes_admin_home: "{{ '/root' if kubernetes_admin_user == 'root' else '/home/' + kubernetes_admin_user }}"
+kubernetes_install_calico_version: "v3.26.1"

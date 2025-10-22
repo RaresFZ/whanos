@@ -1,0 +1,12 @@
+---
+- hosts: jenkins
+  roles:
+    - role: jenkins
+
+- hosts: registry
+  roles:
+    - role: registry
+
+- hosts: k8s_control_plane:k8s_workers
+  roles:
+    - role: kubernetes

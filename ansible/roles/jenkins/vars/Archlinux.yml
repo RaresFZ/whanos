@@ -1,0 +1,9 @@
+---
+jenkins_env_file: /etc/conf.d/jenkins
+jenkins_env_entries:
+  - regex: '^JENKINS_JAVA_OPTIONS='
+    line: 'JENKINS_JAVA_OPTIONS="-Djava.awt.headless=true -DCASC_JENKINS_CONFIG=/var/lib/jenkins/casc_configs/whanos.yaml -Djenkins.install.runSetupWizard=false"'
+  - regex: '^JENKINS_ARGS='
+    line: 'JENKINS_ARGS="--httpPort={{ jenkins_http_port }}"'
+  - regex: '^JENKINS_PORT='
+    line: 'JENKINS_PORT={{ jenkins_http_port }}'

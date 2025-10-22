@@ -1,0 +1,162 @@
+---
+- name: Disable swap
+  ansible.builtin.command: swapoff -a
+  become: true
+  when: ansible_swaptotal_mb | int > 0
+  changed_when: false
+
+- name: Remove swap entry from fstab
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([^#].*?\s+swap\s+.*)$'
+    replace: '# \1'
+
+- name: Refresh pacman cache
+  community.general.pacman:
+    update_cache: true
+  when: ansible_facts.os_family == 'Archlinux'
+
+- name: Ensure apt transport packages
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+    state: present
+    update_cache: true
+  when: ansible_facts.os_family == 'Debian'
+
+- name: Load netfilter modules
+  ansible.builtin.modprobe:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - overlay
+    - br_netfilter
+
+- name: Ensure kernel modules persist
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/kubernetes.conf
+    content: |
+      overlay
+      br_netfilter
+    mode: "0644"
+
+- name: Configure sysctl for Kubernetes networking
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-kubernetes-cri.conf
+    content: |
+      net.bridge.bridge-nf-call-iptables  = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.ipv4.ip_forward                 = 1
+    mode: "0644"
+
+- name: Reload sysctl
+  ansible.builtin.command: sysctl --system
+  changed_when: false
+
+- name: Install container runtime prerequisites
+  ansible.builtin.apt:
+    name:
+      - software-properties-common
+    state: present
+  when: ansible_facts.os_family == 'Debian'
+
+- name: Set up containerd repository
+  ansible.builtin.apt_repository:
+    repo: "deb [trusted=yes] https://download.docker.com/linux/{{ ansible_distribution | lower }} {{ ansible_distribution_release }} stable"
+    state: present
+  when: ansible_facts.os_family == 'Debian'
+
+- name: Install containerd (Debian)
+  ansible.builtin.apt:
+    name:
+      - containerd.io
+    state: present
+  when: ansible_facts.os_family == 'Debian'
+
+- name: Install containerd (Arch)
+  community.general.pacman:
+    name:
+      - containerd
+    state: present
+  when: ansible_facts.os_family == 'Archlinux'
+
+- name: Ensure containerd config directory exists
+  ansible.builtin.file:
+    path: /etc/containerd
+    state: directory
+    mode: '0755'
+
+- name: Configure containerd
+  ansible.builtin.shell: |
+    set -euo pipefail
+    containerd config default | tee /etc/containerd/config.toml >/dev/null
+    sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+  args:
+    creates: /etc/containerd/config.toml
+
+- name: Restart containerd
+  ansible.builtin.service:
+    name: containerd
+    state: restarted
+    enabled: true
+
+- name: Add Kubernetes apt key
+  ansible.builtin.apt_key:
+    url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+    state: present
+  when: ansible_facts.os_family == 'Debian'
+
+- name: Add Kubernetes apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb https://apt.kubernetes.io/ kubernetes-xenial main"
+    state: present
+  when: ansible_facts.os_family == 'Debian'
+
+- name: Install kubeadm, kubelet, kubectl (Debian)
+  ansible.builtin.apt:
+    name:
+      - "kubelet={{ kubernetes_version }}"
+      - "kubeadm={{ kubernetes_version }}"
+      - "kubectl={{ kubernetes_version }}"
+    state: present
+    allow_downgrade: true
+  when: ansible_facts.os_family == 'Debian'
+
+- name: Remove conflicting Kubernetes -bin packages (Arch)
+  community.general.pacman:
+    name:
+      - kubeadm-bin
+      - kubectl-bin
+      - kubelet-bin
+    state: absent
+  ignore_errors: yes  # In case they're not installed
+  when: ansible_facts.os_family == 'Archlinux'
+
+- name: Install Kubernetes packages (Arch)
+  community.general.pacman:
+    name:
+      - kubeadm
+      - kubelet
+      - kubectl
+      - cni-plugins
+    state: present
+  when: ansible_facts.os_family == 'Archlinux'
+
+- name: Hold Kubernetes packages
+  ansible.builtin.apt:
+    name:
+      - kubelet
+      - kubeadm
+      - kubectl
+    state: hold
+    force: true
+  when: ansible_facts.os_family == 'Debian'
+
+- name: Enable kubelet service
+  ansible.builtin.service:
+    name: kubelet
+    enabled: true

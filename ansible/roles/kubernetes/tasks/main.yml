@@ -1,0 +1,11 @@
+---
+- name: Install Kubernetes prerequisites
+  import_tasks: prereqs.yml
+
+- name: Setup control plane components
+  import_tasks: control_plane.yml
+  when: inventory_hostname == groups['k8s_control_plane'][0]
+
+- name: Setup worker node
+  import_tasks: worker.yml
+  when: inventory_hostname in groups['k8s_workers']

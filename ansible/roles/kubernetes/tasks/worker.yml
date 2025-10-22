@@ -1,0 +1,17 @@
+---
+- name: Check if node already joined
+  ansible.builtin.stat:
+    path: /etc/kubernetes/kubelet.conf
+  register: kubelet_conf
+
+- name: Join node to cluster
+  ansible.builtin.command: "{{ hostvars[inventory_hostname].kubernetes_join_command }} --cri-socket unix:///run/containerd/containerd.sock"
+  when:
+    - not kubelet_conf.stat.exists
+    - hostvars[inventory_hostname].get('kubernetes_join_command') is defined
+
+- name: Restart kubelet
+  ansible.builtin.service:
+    name: kubelet
+    state: restarted
+  when: not kubelet_conf.stat.exists

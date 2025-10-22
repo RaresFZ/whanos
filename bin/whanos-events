@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: whanos-events [OPTIONS]
+
+Tail Kubernetes events for Whanos-managed applications.
+
+Options:
+  -n, --namespace NAME   Namespace to inspect (default: whanos-<app> when --app is set)
+  -a, --app NAME         Filter events for an application (matches substring)
+  -k, --kubeconfig PATH  kubeconfig to use
+  -f, --follow           Continuously refresh every 5 seconds
+  -h, --help             Show this help message
+EOF
+}
+
+namespace=""
+app=""
+kubeconfig=""
+follow=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -n|--namespace) namespace="$2"; shift 2 ;;
+    -a|--app) app="$2"; shift 2 ;;
+    -k|--kubeconfig) kubeconfig="$2"; shift 2 ;;
+    -f|--follow) follow=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$namespace" && -n "$app" ]]; then
+  namespace="whanos-${app}"
+fi
+
+kubectl_cmd=(kubectl)
+if [[ -n "$kubeconfig" ]]; then
+  kubectl_cmd=(env KUBECONFIG="$kubeconfig" kubectl)
+fi
+
+if [[ -n "$namespace" ]]; then
+  kubectl_cmd+=(-n "$namespace")
+fi
+
+filter_output() {
+  if [[ -z "$app" ]]; then
+    cat
+  else
+    # Preserve header line, filter body.
+    local header
+    if ! IFS= read -r header; then
+      return 0
+    fi
+    echo "$header"
+    grep -E "$app" || true
+  fi
+}
+
+render_events() {
+  "${kubectl_cmd[@]}" get events --sort-by=.lastTimestamp | filter_output
+}
+
+if [[ $follow -eq 1 ]]; then
+  while true; do
+    clear
+    echo "$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "Namespace: ${namespace:-all} | App filter: ${app:-none}"
+    echo
+    if ! render_events; then
+      echo "Failed to fetch events." >&2
+    fi
+    sleep 5
+  done
+else
+  render_events
+fi

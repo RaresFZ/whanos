@@ -1,0 +1,37 @@
+jenkins:
+  systemMessage: "Provisioned by Ansible for Whanos."
+  location:
+    url: "http://{{ whanos_jenkins_host }}:{{ jenkins_http_port }}/"
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "{{ jenkins_admin_user }}"
+          name: "{{ jenkins_admin_user }}"
+          password: "{{ jenkins_admin_password }}"
+  authorizationStrategy:
+    globalMatrix:
+      permissions:
+        - "GROUP:Anonymous:Overall/Read"
+        - "USER:{{ jenkins_admin_user }}:Overall/Administer"
+  disableRememberMe: false
+
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          - usernamePassword:
+              scope: GLOBAL
+              id: "whanos-registry-creds"
+              description: "Docker registry credentials for Whanos builds"
+              username: "{{ jenkins_registry_username | default('registry_user') }}"
+              password: "{{ jenkins_registry_password | default('changeme') }}"
+          - string:
+              scope: GLOBAL
+              id: "whanos-registry-host"
+              description: "Docker registry hostname used by Whanos builds"
+              secret: "{{ whanos_registry_host }}"
+
+unclassified:
+  location:
+    url: "http://{{ whanos_jenkins_host }}:{{ jenkins_http_port }}/"

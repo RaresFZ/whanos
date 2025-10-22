@@ -1,0 +1,347 @@
+---
+- name: Validate supported operating system
+  ansible.builtin.fail:
+    msg: "Unsupported OS family for Jenkins role: {{ ansible_facts.os_family }}"
+  when: ansible_facts.os_family not in ['Debian', 'Archlinux']
+
+- name: Load OS-specific variables
+  ansible.builtin.include_vars:
+    file: "{{ item }}"
+  with_first_found:
+    - files:
+        - "{{ ansible_facts.os_family }}.yml"
+      paths:
+        - "{{ role_path }}/vars"
+  when: ansible_facts.os_family in ['Debian', 'Archlinux']
+
+- name: Include OS specific setup
+  ansible.builtin.include_tasks: "setup-{{ ansible_facts.os_family | lower }}.yml"
+
+- name: Install python-jenkins for Ansible modules (Debian)
+  ansible.builtin.pip:
+    name: python-jenkins
+  when: ansible_facts.os_family == 'Debian'
+
+- name: Install python-jenkins for Ansible modules (Arch)
+  ansible.builtin.pip:
+    name: python-jenkins
+    extra_args: --break-system-packages
+  when: ansible_facts.os_family == 'Archlinux'
+
+- name: Ensure Jenkins home exists
+  ansible.builtin.file:
+    path: /var/lib/jenkins/casc_configs
+    state: directory
+    owner: jenkins
+    group: jenkins
+    mode: "0755"
+
+- name: Ensure Jenkins init.groovy.d directory exists
+  ansible.builtin.file:
+    path: /var/lib/jenkins/init.groovy.d
+    state: directory
+    owner: jenkins
+    group: jenkins
+    mode: "0755"
+
+- name: Deploy Jenkins Configuration as Code bundle
+  ansible.builtin.template:
+    src: jenkins.yaml.j2
+    dest: /var/lib/jenkins/casc_configs/whanos.yaml
+    owner: jenkins
+    group: jenkins
+    mode: "0640"
+
+- name: Configure Jenkins environment to skip setup wizard
+  ansible.builtin.lineinfile:
+    path: "{{ jenkins_env_file }}"
+    regexp: "{{ item.regex }}"
+    line: "{{ item.line }}"
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - regex: '^JENKINS_JAVA_OPTIONS='
+      line: 'JENKINS_JAVA_OPTIONS="-Djava.awt.headless=true -Djenkins.install.runSetupWizard=false"'
+  when: ansible_facts.os_family == 'Archlinux'
+
+- name: Configure Jenkins environment to skip setup wizard (Debian)
+  ansible.builtin.lineinfile:
+    path: "{{ jenkins_env_file }}"
+    regexp: "{{ item.regex }}"
+    line: "{{ item.line }}"
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - regex: '^JAVA_ARGS='
+      line: 'JAVA_ARGS="-Djava.awt.headless=true -Djenkins.install.runSetupWizard=false"'
+  when: ansible_facts.os_family == 'Debian'
+
+- name: Create marker to skip setup wizard before first start
+  ansible.builtin.file:
+    path: /var/lib/jenkins/jenkins.install.InstallUtil.lastExecVersion
+    state: touch
+    owner: jenkins
+    group: jenkins
+    mode: "0644"
+
+- name: Create marker to skip upgrade wizard
+  ansible.builtin.file:
+    path: /var/lib/jenkins/jenkins.install.UpgradeWizard.state
+    state: touch
+    owner: jenkins
+    group: jenkins
+    mode: "0644"
+
+- name: Temporarily start Jenkins without JCasC for initial setup
+  ansible.builtin.service:
+    name: jenkins
+    state: restarted
+    enabled: true
+
+- name: Install Jenkins CLI helper script
+  ansible.builtin.copy:
+    dest: /usr/local/bin/jenkins-cli.sh
+    mode: "0755"
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      java -jar {{ jenkins_cli_jar }} -s http://localhost:{{ jenkins_http_port }}/ "$@"
+
+- name: Wait for Jenkins to become responsive (without auth)
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jenkins_http_port }}/login"
+    return_content: false
+    status_code: 200
+  register: jenkins_status
+  retries: 30
+  delay: 10
+  until: jenkins_status.status == 200
+
+- name: Download Jenkins CLI jar
+  ansible.builtin.get_url:
+    url: "http://localhost:{{ jenkins_http_port }}/jnlpJars/jenkins-cli.jar"
+    dest: "{{ jenkins_cli_jar }}"
+    mode: "0644"
+
+- name: Disable Jenkins security temporarily for initial setup
+  ansible.builtin.copy:
+    dest: /var/lib/jenkins/init.groovy.d/disable-security.groovy
+    owner: jenkins
+    group: jenkins
+    mode: "0644"
+    content: |
+      import jenkins.model.*
+      import hudson.security.*
+      
+      def instance = Jenkins.getInstance()
+      instance.setSecurityRealm(SecurityRealm.NO_AUTHENTICATION)
+      instance.setAuthorizationStrategy(AuthorizationStrategy.UNSECURED)
+      instance.save()
+
+- name: Restart Jenkins to disable security
+  ansible.builtin.service:
+    name: jenkins
+    state: restarted
+
+- name: Wait for Jenkins to restart without security
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jenkins_http_port }}/login"
+    return_content: false
+    status_code: 200
+  register: jenkins_status
+  retries: 30
+  delay: 10
+  until: jenkins_status.status == 200
+
+- name: Install configuration-as-code plugin first (without auth)
+  ansible.builtin.shell: >
+    java -jar {{ jenkins_cli_jar }}
+    -s http://localhost:{{ jenkins_http_port }}/
+    -http
+    install-plugin configuration-as-code
+  register: casc_plugin_install
+  retries: 3
+  delay: 5
+  until: casc_plugin_install.rc == 0
+
+- name: Remove security disabling script
+  ansible.builtin.file:
+    path: /var/lib/jenkins/init.groovy.d/disable-security.groovy
+    state: absent
+
+- name: Restart Jenkins to load configuration-as-code plugin
+  ansible.builtin.service:
+    name: jenkins
+    state: restarted
+
+- name: Wait for Jenkins to restart
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jenkins_http_port }}/login"
+    return_content: false
+    status_code: 200
+  register: jenkins_status
+  retries: 30
+  delay: 10
+  until: jenkins_status.status == 200
+
+- name: Configure Jenkins environment with JCasC
+  ansible.builtin.lineinfile:
+    path: "{{ jenkins_env_file }}"
+    regexp: "{{ item.regex }}"
+    line: "{{ item.line }}"
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ jenkins_env_entries | default([]) }}"
+
+- name: Verify JCasC configuration file exists and is valid
+  ansible.builtin.shell: cat /var/lib/jenkins/casc_configs/whanos.yaml
+  register: jcasc_config
+  changed_when: false
+
+- name: Display JCasC configuration
+  ansible.builtin.debug:
+    var: jcasc_config.stdout_lines
+
+- name: Restart Jenkins with JCasC configuration
+  ansible.builtin.service:
+    name: jenkins
+    state: restarted
+
+- name: Wait for Jenkins to become responsive with JCasC
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jenkins_http_port }}/login"
+    return_content: false
+    status_code: 200
+  register: jenkins_status
+  retries: 30
+  delay: 10
+  until: jenkins_status.status == 200
+
+- name: Wait for JCasC to complete configuration
+  ansible.builtin.pause:
+    seconds: 20
+
+- name: Check if JCasC configuration was applied
+  ansible.builtin.shell: |
+    grep -i "configuration-as-code" /var/lib/jenkins/logs/jenkins.log || \
+    journalctl -u jenkins --no-pager | grep -i "configuration-as-code" || \
+    echo "No JCasC logs found"
+  register: jcasc_logs
+  changed_when: false
+  ignore_errors: true
+
+- name: Display JCasC logs
+  ansible.builtin.debug:
+    var: jcasc_logs.stdout_lines
+
+- name: Check Jenkins log for errors
+  ansible.builtin.shell: |
+    tail -100 /var/log/jenkins/jenkins.log 2>/dev/null || \
+    journalctl -u jenkins --no-pager -n 100 || \
+    echo "Could not read Jenkins logs"
+  register: jenkins_logs
+  changed_when: false
+  ignore_errors: true
+
+- name: Display recent Jenkins logs
+  ansible.builtin.debug:
+    var: jenkins_logs.stdout_lines
+
+- name: Ensure Jenkins CLI has admin credentials
+  ansible.builtin.copy:
+    dest: /var/lib/jenkins/whanos-admin.txt
+    content: "{{ jenkins_admin_user }}:{{ jenkins_admin_password }}"
+    owner: jenkins
+    group: jenkins
+    mode: "0600"
+
+- name: Verify Jenkins authentication is working
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jenkins_http_port }}/api/json"
+    user: "{{ jenkins_admin_user }}"
+    password: "{{ jenkins_admin_password }}"
+    force_basic_auth: true
+    return_content: false
+    status_code: 200
+  register: jenkins_auth_check
+  retries: 10
+  delay: 10
+  until: jenkins_auth_check.status == 200
+  ignore_errors: true
+
+- name: Debug - Show admin credentials (for troubleshooting)
+  ansible.builtin.debug:
+    msg: "Admin user: {{ jenkins_admin_user }}, Password length: {{ jenkins_admin_password | length }}"
+
+- name: Install remaining Jenkins plugins via CLI
+  ansible.builtin.shell: >
+    java -jar {{ jenkins_cli_jar }}
+    -s http://localhost:{{ jenkins_http_port }}/
+    -auth @/var/lib/jenkins/whanos-admin.txt
+    -http
+    install-plugin {{ item }}
+  loop: "{{ jenkins_plugins | difference(['configuration-as-code']) }}"
+  register: plugin_install_result
+  retries: 5
+  delay: 10
+  until: plugin_install_result.rc == 0
+
+- name: Restart Jenkins to load all plugins
+  ansible.builtin.service:
+    name: jenkins
+    state: restarted
+
+- name: Wait for Jenkins to restart after plugin installation
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jenkins_http_port }}/login"
+    return_content: false
+    status_code: 200
+  register: jenkins_status
+  retries: 30
+  delay: 10
+  until: jenkins_status.status == 200
+
+- name: Wait for all plugins to fully load
+  ansible.builtin.pause:
+    seconds: 15
+
+- name: Prepare pipeline job configuration
+  ansible.builtin.template:
+    src: jenkins-pipeline-config.xml.j2
+    dest: "/tmp/{{ item.name }}.xml"
+  loop: "{{ jenkins_seed_jobs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  vars:
+    job: "{{ item }}"
+
+- name: Apply pipeline job configuration
+  ansible.builtin.shell: |
+    set -euo pipefail
+    java -jar {{ jenkins_cli_jar }} \
+      -s http://localhost:{{ jenkins_http_port }}/ \
+      -auth @/var/lib/jenkins/whanos-admin.txt \
+      -http delete-job {{ item.name }} || true
+    java -jar {{ jenkins_cli_jar }} \
+      -s http://localhost:{{ jenkins_http_port }}/ \
+      -auth @/var/lib/jenkins/whanos-admin.txt \
+      -http create-job {{ item.name }} < /tmp/{{ item.name }}.xml
+  args:
+    executable: /bin/bash
+  loop: "{{ jenkins_seed_jobs }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Clean up pipeline job configuration files
+  ansible.builtin.file:
+    path: "/tmp/{{ item.name }}.xml"
+    state: absent
+  loop: "{{ jenkins_seed_jobs }}"
+  loop_control:
+    label: "{{ item.name }}"

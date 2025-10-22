@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: whanos-build [OPTIONS]
+
+Wrapper around orchestrator/main.py for ad-hoc builds.
+
+Options:
+  -r, --repo PATH           Path to the application repository (default: current directory)
+  -i, --image REF           Fully qualified image reference (required)
+  -R, --registry HOST       Registry hostname (defaults to extracting from image ref)
+  -s, --skip-tests          Skip tests before building
+      --no-push             Build but do not push
+      --build-arg KEY=VAL   Pass through build argument (repeatable)
+  -h, --help                Show this help message
+
+Environment:
+  WHANOS_REGISTRY_USERNAME / WHANOS_REGISTRY_PASSWORD for registry auth.
+EOF
+}
+
+repo="."
+image=""
+registry=""
+skip_tests=0
+no_push=0
+build_args=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -r|--repo)
+      repo="$2"
+      shift 2
+      ;;
+    -i|--image)
+      image="$2"
+      shift 2
+      ;;
+    -R|--registry)
+      registry="$2"
+      shift 2
+      ;;
+    -s|--skip-tests)
+      skip_tests=1
+      shift
+      ;;
+    --no-push)
+      no_push=1
+      shift
+      ;;
+    --build-arg)
+      build_args+=("$2")
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ -z "$image" ]]; then
+  echo "Error: --image is required" >&2
+  usage >&2
+  exit 1
+fi
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cmd=(python3 "$script_dir/../orchestrator/main.py" --repo "$repo" --image "$image")
+
+if [[ -n "$registry" ]]; then
+  cmd+=(--registry "$registry")
+fi
+
+if [[ $skip_tests -eq 1 ]]; then
+  cmd+=(--skip-tests)
+fi
+
+if [[ $no_push -eq 1 ]]; then
+  cmd+=(--no-push)
+fi
+
+for arg in "${build_args[@]}"; do
+  cmd+=(--build-arg "$arg")
+done
+
+echo "Executing: ${cmd[*]}"
+"${cmd[@]}"

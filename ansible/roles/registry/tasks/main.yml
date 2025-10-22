@@ -1,0 +1,109 @@
+---
+- name: Validate supported operating system
+  ansible.builtin.fail:
+    msg: "Unsupported OS family for registry role: {{ ansible_facts.os_family }}"
+  when: ansible_facts.os_family not in ['Debian', 'Archlinux']
+
+- name: Include OS specific setup
+  ansible.builtin.include_tasks: "setup-{{ ansible_facts.os_family | lower }}.yml"
+
+- name: Create registry directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0750"
+    owner: root
+    group: root
+  loop:
+    - "{{ registry_data_dir }}"
+    - "{{ registry_auth_dir }}"
+    - /srv/registry
+    - /srv/registry/caddy
+    - /srv/registry/caddy/data
+    - /srv/registry/caddy/config
+
+- name: Load kernel modules required for Docker networking
+  ansible.builtin.shell: |
+    set -o pipefail
+    if lsmod | awk '{print $1}' | grep -qx '{{ item }}'; then
+      exit 0
+    fi
+    modprobe {{ item }}
+    echo "loaded"
+  args:
+    executable: /bin/bash
+  loop: "{{ registry_required_kernel_modules }}"
+  loop_control:
+    label: "{{ item }}"
+  register: registry_modprobe_attempts
+  changed_when: (result.stdout | default('')) != ''
+  failed_when: false
+
+- name: Detect missing Docker networking kernel modules
+  ansible.builtin.set_fact:
+    registry_missing_kernel_modules: "{{ registry_modprobe_attempts.results | selectattr('rc', '!=', 0) | map(attribute='item') | list }}"
+
+- name: Fail when required kernel modules are unavailable
+  ansible.builtin.fail:
+    msg: |
+      The following kernel modules are required for Docker networking but could not be loaded: {{ registry_missing_kernel_modules | join(', ') }}.
+      Install or enable these modules on the host, then rerun the playbook.
+  when: registry_missing_kernel_modules | length > 0
+
+- name: Initialize Caddy auth entry list
+  ansible.builtin.set_fact:
+    registry_caddy_auth_entries: []
+
+- name: Generate bcrypt hashes for registry users
+  ansible.builtin.command:
+    argv:
+      - htpasswd
+      - -Bbn
+      - "{{ item.username }}"
+      - "{{ item.password }}"
+  loop: "{{ registry_users }}"
+  loop_control:
+    label: "{{ item.username }}"
+  register: registry_htpasswd_entries
+  changed_when: false
+  no_log: true
+
+- name: Prepare Caddy basic auth entries
+  ansible.builtin.set_fact:
+    registry_caddy_auth_entries: >-
+      {{
+        (registry_caddy_auth_entries | default([]))
+        + [
+            {
+              'username': item.item.username,
+              'hash': (item.stdout.split(':', 1)[1] | trim)
+            }
+          ]
+      }}
+  loop: "{{ registry_htpasswd_entries.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.username }}"
+  when:
+    - registry_htpasswd_entries.results is defined
+    - item.rc == 0
+
+- name: Deploy Caddy configuration
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: /srv/registry/caddy/Caddyfile
+    mode: "0644"
+
+- name: Deploy docker-compose stack
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: /srv/registry/docker-compose.yml
+    mode: "0644"
+
+- name: Ensure registry stack is running
+  ansible.builtin.shell: |
+    set -euo pipefail
+    docker compose -f /srv/registry/docker-compose.yml up -d
+  args:
+    chdir: /srv/registry
+  register: compose_result
+  changed_when: "'Creating' in compose_result.stdout or 'Recreating' in compose_result.stdout"

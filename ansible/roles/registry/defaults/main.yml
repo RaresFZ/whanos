@@ -1,0 +1,17 @@
+---
+registry_image: registry:2
+registry_data_dir: /srv/registry/data
+registry_auth_dir: /srv/registry/auth
+registry_proxy_image: caddy:2.7
+registry_domain: "{{ whanos_registry_host }}"
+registry_tls_email: ops@example.com
+registry_users:
+  - username: ci
+    password: changeme
+registry_required_kernel_modules:
+  - br_netfilter
+  - iptable_filter
+  - iptable_nat
+  - nf_nat
+  - xt_conntrack
+  - xt_MASQUERADE

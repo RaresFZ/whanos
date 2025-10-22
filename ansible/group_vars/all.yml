@@ -1,0 +1,7 @@
+---
+ansible_user: deploy
+ansible_become: true
+whanos_domain: whanos.example.com
+whanos_registry_host: registry.{{ whanos_domain }}
+whanos_jenkins_host: jenkins.{{ whanos_domain }}
+whanos_default_timezone: UTC

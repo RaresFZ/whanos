@@ -1,0 +1,13 @@
+# syntax=docker/dockerfile:1.6
+FROM maven:3.9.6-eclipse-temurin-21
+
+LABEL maintainer="whanos" \
+      org.whanos.language="java"
+
+WORKDIR /workspace
+
+# Maven wrapper is optional; default command builds the application package.
+ENV WHANOS_BUILD_CMD="mvn -f app/pom.xml -DskipTests package"
+ENV WHANOS_JAR_PATH="app/target/app.jar"
+
+CMD ["sh", "-c", "if [ -f \"$WHANOS_JAR_PATH\" ]; then java -jar \"$WHANOS_JAR_PATH\"; else echo \"Jar not built; run: $WHANOS_BUILD_CMD\" && exit 1; fi"]

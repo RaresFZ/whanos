@@ -1,0 +1,12 @@
+# syntax=docker/dockerfile:1.6
+FROM whanos-javascript:latest
+
+WORKDIR /workspace
+
+COPY package*.json ./
+
+RUN npm ci --omit=dev || npm install --production
+
+COPY . .
+
+CMD ["node", "."]

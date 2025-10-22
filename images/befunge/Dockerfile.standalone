@@ -1,0 +1,8 @@
+# syntax=docker/dockerfile:1.6
+FROM whanos-befunge:latest
+
+WORKDIR /workspace
+
+COPY . .
+
+CMD ["befunge93", "app/main.bf"]

@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v trivy >/dev/null 2>&1; then
+  echo "Error: trivy is not installed. See https://aquasecurity.github.io/trivy/v0.47/getting-started/installation/ for instructions." >&2
+  exit 1
+fi
+
+usage() {
+  cat <<'EOF'
+Usage: whanos-scan [OPTIONS] IMAGE
+
+Run a container image vulnerability scan using Trivy.
+
+Options:
+  -f, --format fmt   Output format (table|json|template) (default: table)
+  -o, --output FILE  Write report to file instead of stdout
+  -s, --severity lvls  Comma-separated severities to report (default: CRITICAL,HIGH)
+      --ignorefile PATH  Path to .trivyignore file
+  -h, --help         Show this message
+EOF
+}
+
+format="table"
+output=""
+severity="CRITICAL,HIGH"
+ignorefile=""
+
+positionals=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -f|--format) format="$2"; shift 2 ;;
+    -o|--output) output="$2"; shift 2 ;;
+    -s|--severity) severity="$2"; shift 2 ;;
+    --ignorefile) ignorefile="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    --) shift; break ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+    *)
+      positionals+=("$1"); shift ;;
+  esac
+done
+
+if [[ ${#positionals[@]} -ne 1 ]]; then
+  echo "Error: IMAGE reference required." >&2
+  usage >&2
+  exit 1
+fi
+
+image="${positionals[0]}"
+
+cmd=(trivy image "--severity" "$severity" "--format" "$format")
+
+if [[ -n "$output" ]]; then
+  cmd+=("--output" "$output")
+fi
+
+if [[ -n "$ignorefile" ]]; then
+  cmd+=("--ignorefile" "$ignorefile")
+fi
+
+cmd+=("$image")
+
+echo "Running: ${cmd[*]}"
+"${cmd[@]}"

@@ -1,0 +1,18 @@
+---
+- name: Refresh pacman cache (Arch)
+  community.general.pacman:
+    update_cache: true
+
+- name: Install Docker packages (Arch)
+  community.general.pacman:
+    name:
+      - docker
+      - docker-compose
+      - apache
+    state: present
+
+- name: Ensure Docker service is running (Arch)
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true

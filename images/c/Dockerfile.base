@@ -1,0 +1,18 @@
+# syntax=docker/dockerfile:1.6
+FROM debian:12-slim
+
+LABEL maintainer="whanos" \
+      org.whanos.language="c"
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       build-essential \
+       make \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+# A Whanos C repository is expected to provide a Makefile that builds a compiled-app binary.
+ENV WHANOS_ENTRYPOINT="./compiled-app"
+
+CMD ["sh", "-c", "${WHANOS_ENTRYPOINT}"]

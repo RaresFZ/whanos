@@ -1,0 +1,10 @@
+# syntax=docker/dockerfile:1.6
+FROM whanos-java:latest
+
+WORKDIR /workspace
+
+COPY . .
+
+RUN mvn -f app/pom.xml -DskipTests package
+
+CMD ["java", "-jar", "app/target/app.jar"]

@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: whanos-deploy [OPTIONS]
+
+Render and apply Kubernetes manifests from a whanos.yml file.
+
+Options:
+  -c, --config FILE               Path to whanos.yml (default: whanos.yml)
+  -i, --image REF                 Image reference to deploy (required)
+  -a, --app NAME                  Application name (required)
+  -n, --namespace NAME            Kubernetes namespace (default: whanos-<app>)
+  -k, --kubeconfig PATH           kubeconfig to use (default: current context)
+  -s, --service-account NS/NAME   Deployer service account (default: jenkins/whanos-deployer)
+      --expose-mode MODE          ingress|clusterip|nodeport (default: ingress)
+      --service-type TYPE         ClusterIP|NodePort|LoadBalancer (default: ClusterIP)
+      --domain DOMAIN             Base domain for ingress (required for ingress)
+      --tls-secret NAME           TLS secret for ingress
+      --nodeport-base PORT        Base NodePort when using nodeport (default: 30000)
+      --output-dir DIR            Write manifests to directory instead of applying
+      --dry-run                   Print manifests without applying
+  -h, --help                      Show this help message
+EOF
+}
+
+config="whanos.yml"
+image=""
+app=""
+namespace=""
+kubeconfig=""
+service_account="jenkins/whanos-deployer"
+expose_mode="ingress"
+service_type="ClusterIP"
+domain=""
+tls_secret=""
+nodeport_base=30000
+output_dir=""
+dry_run=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -c|--config) config="$2"; shift 2 ;;
+    -i|--image) image="$2"; shift 2 ;;
+    -a|--app) app="$2"; shift 2 ;;
+    -n|--namespace) namespace="$2"; shift 2 ;;
+    -k|--kubeconfig) kubeconfig="$2"; shift 2 ;;
+    -s|--service-account) service_account="$2"; shift 2 ;;
+    --expose-mode) expose_mode="$2"; shift 2 ;;
+    --service-type) service_type="$2"; shift 2 ;;
+    --domain) domain="$2"; shift 2 ;;
+    --tls-secret) tls_secret="$2"; shift 2 ;;
+    --nodeport-base) nodeport_base="$2"; shift 2 ;;
+    --output-dir) output_dir="$2"; shift 2 ;;
+    --dry-run) dry_run=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$image" ]]; then
+  echo "Error: --image is required" >&2
+  usage >&2
+  exit 1
+fi
+
+if [[ -z "$app" ]]; then
+  echo "Error: --app is required" >&2
+  usage >&2
+  exit 1
+fi
+
+if [[ -z "$namespace" ]]; then
+  namespace="whanos-${app}"
+fi
+
+if [[ "$expose_mode" == "ingress" && -z "$domain" ]]; then
+  echo "Error: --domain is required when --expose-mode ingress" >&2
+  exit 1
+fi
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+renderer="${script_dir}/../kubernetes/render_deployment.py"
+
+cmd=(
+  python3 "$renderer"
+  --config "$config"
+  --image "$image"
+  --app "$app"
+  --namespace "$namespace"
+  --deployer-service-account "$service_account"
+  --expose-mode "$expose_mode"
+  --service-type "$service_type"
+  --nodeport-base "$nodeport_base"
+)
+
+if [[ -n "$domain" ]]; then
+  cmd+=(--domain "$domain")
+fi
+
+if [[ -n "$tls_secret" ]]; then
+  cmd+=(--tls-secret "$tls_secret")
+fi
+
+apply_manifests() {
+  local directory="$1"
+  if [[ $dry_run -eq 1 ]]; then
+    for file in "$directory"/*.yaml; do
+      [[ -f "$file" ]] || continue
+      echo "---"
+      cat "$file"
+    done
+    return 0
+  fi
+
+  echo "Applying manifests from ${directory}"
+  if [[ -n "$kubeconfig" ]]; then
+    KUBECONFIG="$kubeconfig" kubectl apply -f "$directory"
+  else
+    kubectl apply -f "$directory"
+  fi
+}
+
+if [[ -n "$output_dir" ]]; then
+  mkdir -p "$output_dir"
+  cmd+=(--output-dir "$output_dir")
+  echo "Rendering manifests to ${output_dir}"
+  "${cmd[@]}"
+  if [[ $dry_run -eq 1 ]]; then
+    echo "Dry run complete. Manifests saved at ${output_dir}"
+  else
+    apply_manifests "$output_dir"
+  fi
+else
+  tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "$tmp_dir"' EXIT
+  cmd+=(--output-dir "$tmp_dir")
+  echo "Rendering manifests to ${tmp_dir}"
+  "${cmd[@]}"
+  apply_manifests "$tmp_dir"
+fi

@@ -1,0 +1,30 @@
+version: "3.8"
+
+services:
+  registry:
+    image: {{ registry_image }}
+    restart: unless-stopped
+    environment:
+      REGISTRY_HTTP_ADDR: 0.0.0.0:5000
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+    volumes:
+      - {{ registry_data_dir }}:/var/lib/registry
+    networks:
+      - registry
+
+  proxy:
+    image: {{ registry_proxy_image }}
+    restart: unless-stopped
+    ports:
+      - "443:443"
+    volumes:
+      - {{ registry_auth_dir }}:/auth:ro
+      - /srv/registry/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /srv/registry/caddy/data:/data
+      - /srv/registry/caddy/config:/config
+    networks:
+      - registry
+
+networks:
+  registry:
+    driver: bridge

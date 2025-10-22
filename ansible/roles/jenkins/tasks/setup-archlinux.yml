@@ -1,0 +1,25 @@
+---
+- name: Refresh pacman cache (Arch)
+  community.general.pacman:
+    update_cache: true
+
+- name: Install Docker and Jenkins prerequisites (Arch)
+  community.general.pacman:
+    name:
+      - docker
+      - docker-compose
+      - git
+      - jdk-openjdk
+      - python-pip
+    state: present
+
+- name: Install Jenkins (Arch)
+  community.general.pacman:
+    name: jenkins
+    state: present
+
+- name: Ensure docker service is running (Arch)
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
