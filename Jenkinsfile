@@ -27,10 +27,16 @@ pipeline {
             defaultValue: '',
             description: 'Optional newline-separated Docker build args in KEY=VALUE form.'
         )
+        string(
+            name: 'REGISTRY_HOST',
+            defaultValue: '',
+            description: 'Override registry host. Leave blank to use Jenkins global setting.'
+        )
     }
 
     environment {
         IMAGE_NAMESPACE = 'whanos/apps'
+        REGISTRY_HOST = "${params.REGISTRY_HOST?.trim() ? params.REGISTRY_HOST.trim() : (env.GLOBAL_REGISTRY_HOST ?: '')}"
     }
 
     stages {
@@ -69,7 +75,7 @@ pipeline {
                         sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
                     }
                     if (!env.REGISTRY_HOST?.trim()) {
-                        error("REGISTRY_HOST is not defined in the Jenkins environment.")
+                        error("REGISTRY_HOST is not defined. Provide the pipeline parameter or configure Jenkins global env GLOBAL_REGISTRY_HOST.")
                     }
                     env.WHANOS_IMAGE_REF = "${env.REGISTRY_HOST}/${IMAGE_NAMESPACE}/${repoName}:${appCommit}"
                     env.WHANOS_IMAGE_REF_LATEST = "${env.REGISTRY_HOST}/${IMAGE_NAMESPACE}/${repoName}:${branchSlug}"
