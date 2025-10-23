@@ -345,3 +345,16 @@
   loop: "{{ jenkins_seed_jobs }}"
   loop_control:
     label: "{{ item.name }}"
+
+- name: Build Whanos base images
+  ansible.builtin.shell: |
+    set -euo pipefail
+    docker build -t whanos-{{ item }}:latest -f {{ playbook_dir }}/../images/{{ item }}/Dockerfile.base {{ playbook_dir }}/../images/{{ item }}/
+  loop:
+    - c
+    - java
+    - javascript
+    - python
+    - befunge
+  register: base_image_build
+  changed_when: "'Successfully built' in base_image_build.stdout or 'Successfully tagged' in base_image_build.stdout"
