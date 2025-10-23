@@ -118,7 +118,12 @@ if [[ $SKIP_ANSIBLE -eq 0 ]]; then
 fi
 
 if [[ $SKIP_RBAC -eq 0 ]]; then
-  run_cmd "Applying Jenkins deployer RBAC" kubectl apply -f "$K8S_RBAC"
+  # Use the user's kubeconfig if available, otherwise use sudo to access admin.conf
+  if [[ -f "$HOME/.kube/config" ]]; then
+    run_cmd "Applying Jenkins deployer RBAC" kubectl apply -f "$K8S_RBAC"
+  else
+    run_cmd "Applying Jenkins deployer RBAC" sudo kubectl apply -f "$K8S_RBAC"
+  fi
 fi
 
 if [[ $BOOTSTRAP_IMAGES -eq 1 ]]; then
