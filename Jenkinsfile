@@ -93,29 +93,29 @@ pipeline {
                                     if (!value) {
                                         return "''"
                                     }
-                                return "'" + value.replace("'", "'\"'\"'") + "'"
-                            }
+                                    return "'" + value.replace("'", "'\"'\"'") + "'"
+                                }
 
-                            def additionalArgs = params.ADDITIONAL_BUILD_ARGS
-                                .split("\\r?\\n")
-                                .findAll { it?.trim() }
-                                .collect { it.trim() }
+                                def additionalArgs = params.ADDITIONAL_BUILD_ARGS
+                                    .split("\\r?\\n")
+                                    .findAll { it?.trim() }
+                                    .collect { it.trim() }
 
-                            def commandParts = [
-                                "python3",
-                                "orchestrator/main.py",
-                                "--repo ${shellQuote("${WORKSPACE}/app")}",
-                                "--image ${shellQuote(env.WHANOS_IMAGE_REF)}",
-                                "--registry ${shellQuote(env.REGISTRY_HOST)}"
-                            ]
+                                def commandParts = [
+                                    "python3",
+                                    "orchestrator/main.py",
+                                    "--repo ${shellQuote("${WORKSPACE}/app")}",
+                                    "--image ${shellQuote(env.WHANOS_IMAGE_REF)}",
+                                    "--registry ${shellQuote(env.REGISTRY_HOST)}"
+                                ]
 
-                            if (params.SKIP_TESTS) {
-                                commandParts << "--skip-tests"
-                            }
+                                if (params.SKIP_TESTS) {
+                                    commandParts << "--skip-tests"
+                                }
 
-                            additionalArgs.each { value ->
-                                commandParts << "--build-arg ${shellQuote(value)}"
-                            }
+                                additionalArgs.each { value ->
+                                    commandParts << "--build-arg ${shellQuote(value)}"
+                                }
 
                                 def command = commandParts.join(" \\\n                              ")
 
@@ -127,6 +127,7 @@ pipeline {
                         }
                     }
                 }
+            }
         }
 
         stage('Tag latest for branch') {
