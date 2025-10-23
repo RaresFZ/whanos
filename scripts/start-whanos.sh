@@ -115,7 +115,24 @@ if [[ $SKIP_ANSIBLE -eq 0 ]]; then
 fi
 
 if [[ $SKIP_RBAC -eq 0 ]]; then
-  run_cmd "Applying Jenkins deployer RBAC" kubectl apply -f "$K8S_RBAC"
+  echo ">>> Waiting for Kubernetes API server to be ready..."
+  retries=30
+  while [[ $retries -gt 0 ]]; do
+    if kubectl cluster-info >/dev/null 2>&1; then
+      echo ">>> Kubernetes API server is ready"
+      break
+    fi
+    echo ">>> Waiting for API server... ($retries retries left)"
+    sleep 10
+    ((retries--))
+  done
+  
+  if [[ $retries -eq 0 ]]; then
+    echo "Warning: Kubernetes API server not ready after waiting. Skipping RBAC setup." >&2
+    echo "You can apply it manually later with: kubectl apply -f $K8S_RBAC" >&2
+  else
+    run_cmd "Applying Jenkins deployer RBAC" kubectl apply -f "$K8S_RBAC"
+  fi
 fi
 
 if [[ $BOOTSTRAP_IMAGES -eq 1 ]]; then
