@@ -16,7 +16,7 @@ jenkins_plugins:
 jenkins_seed_jobs:
   - name: whanos-orchestrator
     script_path: Jenkinsfile
-    git_url: "git@github.com:RaresFZ/whanos.git"
+    git_url: "https://github.com/RaresFZ/whanos.git"
     git_branch: "main"
 jenkins_registry_username: ci
 jenkins_registry_password: changeme
