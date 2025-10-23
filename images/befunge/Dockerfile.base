@@ -1,15 +1,12 @@
 # syntax=docker/dockerfile:1.6
-FROM debian:12-slim
+FROM python:3.11-slim
 
 LABEL maintainer="whanos" \
       org.whanos.language="befunge"
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-       befunge93 \
-    && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir pyfunge
 
 WORKDIR /workspace
 
 # A Whanos Befunge repository must expose app/main.bf.
-CMD ["befunge93", "app/main.bf"]
+CMD ["pyfunge", "app/main.bf"]
