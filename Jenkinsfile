@@ -29,14 +29,14 @@ pipeline {
         )
         string(
             name: 'REGISTRY_HOST',
-            defaultValue: '',
-            description: 'Override registry host. Leave blank to use Jenkins global setting.'
+            defaultValue: 'registry.whanos.example.com',
+            description: 'Registry host. Override if needed.'
         )
     }
 
     environment {
         IMAGE_NAMESPACE = 'whanos/apps'
-        REGISTRY_HOST = "${params.REGISTRY_HOST?.trim() ? params.REGISTRY_HOST.trim() : (env.GLOBAL_REGISTRY_HOST ?: '')}"
+        REGISTRY_HOST = "${params.REGISTRY_HOST?.trim() ?: env.GLOBAL_REGISTRY_HOST ?: 'registry.whanos.example.com'}"
     }
 
     stages {
