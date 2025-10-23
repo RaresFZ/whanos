@@ -7,3 +7,10 @@ kubernetes_api_advertise_address: "{{ ansible_host | default(ansible_default_ipv
 kubernetes_admin_user: "{{ ansible_env.SUDO_USER | default(ansible_env.USER | default(ansible_user | default('root'))) }}"
 kubernetes_admin_home: "{{ '/root' if kubernetes_admin_user == 'root' else '/home/' + kubernetes_admin_user }}"
 kubernetes_install_calico_version: "v3.26.1"
+kubernetes_excluded_interfaces:
+  - lo
+  - tailscale0
+  - tailscale1
+  - wg0
+  - tun0
+  - utun0

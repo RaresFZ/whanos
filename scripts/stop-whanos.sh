@@ -66,6 +66,7 @@ if [[ $SKIP_JENKINS -eq 0 ]]; then
   run_cmd "Stopping Jenkins service" ansible \
     -i "$INVENTORY" \
     jenkins \
+    -b \
     -m ansible.builtin.service \
     -a "name=jenkins state=stopped enabled=no"
 fi
@@ -74,6 +75,7 @@ if [[ $SKIP_REGISTRY -eq 0 ]]; then
   run_cmd "Stopping registry docker compose stack" ansible \
     -i "$INVENTORY" \
     registry \
+    -b \
     -m ansible.builtin.shell \
     -a "set -euo pipefail && docker compose -f /srv/registry/docker-compose.yml down"
 
@@ -81,6 +83,7 @@ if [[ $SKIP_REGISTRY -eq 0 ]]; then
     run_cmd "Purging registry data directory" ansible \
       -i "$INVENTORY" \
       registry \
+      -b \
       -m ansible.builtin.file \
       -a "path=/srv/registry/data state=absent"
   fi
@@ -90,12 +93,14 @@ if [[ $RESET_K8S -eq 1 ]]; then
   run_cmd "Resetting Kubernetes workers" ansible \
     -i "$INVENTORY" \
     k8s_workers \
+    -b \
     -m ansible.builtin.shell \
     -a "kubeadm reset -f"
 
   run_cmd "Resetting Kubernetes control plane" ansible \
     -i "$INVENTORY" \
     k8s_control_plane \
+    -b \
     -m ansible.builtin.shell \
     -a "kubeadm reset -f && rm -rf /etc/kubernetes ~/.kube"
 fi

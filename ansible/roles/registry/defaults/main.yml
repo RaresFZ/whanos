@@ -5,6 +5,7 @@ registry_auth_dir: /srv/registry/auth
 registry_proxy_image: caddy:2.7
 registry_domain: "{{ whanos_registry_host }}"
 registry_tls_email: ops@example.com
+registry_tls_mode: internal
 registry_users:
   - username: ci
     password: changeme

@@ -17,9 +17,43 @@
   changed_when: false
   when: ansible_default_ipv4.address is not defined or ansible_default_ipv4.address == '127.0.0.1'
 
+- name: Collect excluded interface addresses
+  ansible.builtin.set_fact:
+    k8s_excluded_addresses: >-
+      {{
+        (k8s_excluded_addresses | default([]))
+        + [
+            ansible_facts['ansible_' + item]['ipv4']['address']
+          ]
+      }}
+  loop: "{{ kubernetes_excluded_interfaces | default([]) }}"
+  when:
+    - ansible_facts['ansible_' + item] is defined
+    - ansible_facts['ansible_' + item]['ipv4'] is defined
+
+- name: Build candidate advertise address list
+  ansible.builtin.set_fact:
+    k8s_advertise_candidates: "{{ (ansible_all_ipv4_addresses | default([])) | reject('match', '^127\\.') | reject('match', '^169\\.254') | reject('match', '^100\\.64') | list }}"
+
 - name: Determine API server advertise address
   ansible.builtin.set_fact:
-    k8s_advertise_address: "{{ ansible_default_ipv4.address | default(primary_ip_fallback.stdout | default('127.0.0.1')) }}"
+    k8s_advertise_address: >-
+      {{
+        (
+          kubernetes_api_advertise_address
+          if kubernetes_api_advertise_address is defined and (kubernetes_api_advertise_address | regex_search('^\\d+\\.'))
+          else (
+            ansible_default_ipv4.address
+            if ansible_default_ipv4.address is defined
+            and ansible_default_ipv4.address not in (k8s_excluded_addresses | default([]))
+            and ansible_default_ipv4.address in (k8s_advertise_candidates | default([]))
+            else (
+              (k8s_advertise_candidates | difference(k8s_excluded_addresses | default([])) | first)
+              | default(primary_ip_fallback.stdout | default('127.0.0.1'))
+            )
+          )
+        )
+      }}
 
 - name: Display advertise address
   ansible.builtin.debug:

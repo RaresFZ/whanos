@@ -28,13 +28,38 @@
     update_cache: true
   when: ansible_facts.os_family == 'Debian'
 
-- name: Load netfilter modules
-  ansible.builtin.modprobe:
-    name: "{{ item }}"
-    state: present
+- name: Ensure networking kernel modules are present
+  ansible.builtin.command: "modprobe {{ item }}"
+  become: true
+  register: k8s_modprobe_result
+  ignore_errors: true
   loop:
     - overlay
     - br_netfilter
+    - ip_tables
+    - ip6_tables
+    - iptable_filter
+    - ip6table_filter
+    - iptable_nat
+    - nf_nat
+    - nf_conntrack
+    - xt_conntrack
+    - xt_set
+    - vxlan
+  loop_control:
+    label: "{{ item }}"
+
+- name: Determine missing networking kernel modules
+  ansible.builtin.set_fact:
+    k8s_missing_modules: "{{ k8s_modprobe_result.results | default([]) | selectattr('rc', '!=', 0) | map(attribute='item') | list }}"
+
+- name: Fail when required networking modules are unavailable
+  ansible.builtin.fail:
+    msg: >
+      The following kernel modules could not be loaded: {{ k8s_missing_modules | join(', ') }}.
+      Ensure the running kernel provides these modules (e.g. install the appropriate kernel modules package)
+      and rerun the playbook.
+  when: k8s_missing_modules | length > 0
 
 - name: Ensure kernel modules persist
   ansible.builtin.copy:
@@ -42,6 +67,16 @@
     content: |
       overlay
       br_netfilter
+      ip_tables
+      ip6_tables
+      iptable_filter
+      ip6table_filter
+      iptable_nat
+      nf_nat
+      nf_conntrack
+      xt_conntrack
+      xt_set
+      vxlan
     mode: "0644"
 
 - name: Configure sysctl for Kubernetes networking
@@ -51,6 +86,8 @@
       net.bridge.bridge-nf-call-iptables  = 1
       net.bridge.bridge-nf-call-ip6tables = 1
       net.ipv4.ip_forward                 = 1
+      net.ipv6.conf.all.forwarding        = 1
+      net.ipv6.conf.default.forwarding    = 1
     mode: "0644"
 
 - name: Reload sysctl
@@ -84,11 +121,52 @@
     state: present
   when: ansible_facts.os_family == 'Archlinux'
 
+- name: Ensure Kubernetes networking dependencies are present (Debian)
+  ansible.builtin.apt:
+    name:
+      - iptables
+      - ipset
+      - conntrack
+      - socat
+      - ebtables
+    state: present
+  when: ansible_facts.os_family == 'Debian'
+
+- name: Ensure Kubernetes networking dependencies are present (Arch)
+  community.general.pacman:
+    name:
+      - iptables-nft
+      - ipset
+      - conntrack-tools
+      - socat
+      - ebtables
+    state: present
+  when: ansible_facts.os_family == 'Archlinux'
+
 - name: Ensure containerd config directory exists
   ansible.builtin.file:
     path: /etc/containerd
     state: directory
     mode: '0755'
+
+- name: Ensure CNI directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - /etc/cni/net.d
+    - /opt/cni/bin
+
+- name: Remove default containerd CNI configuration
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/cni/net.d/10-containerd-net.conflist
+    - /etc/cni/net.d/10-crio-bridge.conf
+    - /etc/cni/net.d/10-flannel.conflist
+  ignore_errors: true
 
 - name: Configure containerd
   ansible.builtin.shell: |

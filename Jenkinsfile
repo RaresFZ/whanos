@@ -30,7 +30,6 @@ pipeline {
     }
 
     environment {
-        REGISTRY_HOST = credentials('whanos-registry-host')
         IMAGE_NAMESPACE = 'whanos/apps'
     }
 
@@ -69,8 +68,11 @@ pipeline {
                     def appCommit = dir('app') {
                         sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
                     }
-                    env.WHANOS_IMAGE_REF = "${REGISTRY_HOST}/${IMAGE_NAMESPACE}/${repoName}:${appCommit}"
-                    env.WHANOS_IMAGE_REF_LATEST = "${REGISTRY_HOST}/${IMAGE_NAMESPACE}/${repoName}:${branchSlug}"
+                    if (!env.REGISTRY_HOST?.trim()) {
+                        error("REGISTRY_HOST is not defined in the Jenkins environment.")
+                    }
+                    env.WHANOS_IMAGE_REF = "${env.REGISTRY_HOST}/${IMAGE_NAMESPACE}/${repoName}:${appCommit}"
+                    env.WHANOS_IMAGE_REF_LATEST = "${env.REGISTRY_HOST}/${IMAGE_NAMESPACE}/${repoName}:${branchSlug}"
                 }
             }
         }
@@ -85,11 +87,12 @@ pipeline {
                             passwordVariable: 'WHANOS_REGISTRY_PASSWORD'
                         )
                     ]) {
-                        script {
-                            def shellQuote = { String value ->
-                                if (!value) {
-                                    return "''"
-                                }
+                        withEnv(['DOCKER_BUILDKIT=1']) {
+                            script {
+                                def shellQuote = { String value ->
+                                    if (!value) {
+                                        return "''"
+                                    }
                                 return "'" + value.replace("'", "'\"'\"'") + "'"
                             }
 
@@ -114,26 +117,28 @@ pipeline {
                                 commandParts << "--build-arg ${shellQuote(value)}"
                             }
 
-                            def command = commandParts.join(" \\\n                              ")
+                                def command = commandParts.join(" \\\n                              ")
 
-                            sh """
-                                set -euo pipefail
-                                ${command}
-                            """
+                                sh """
+                                    set -euo pipefail
+                                    ${command}
+                                """
+                            }
                         }
                     }
                 }
-            }
         }
 
         stage('Tag latest for branch') {
             steps {
                 ansiColor('xterm') {
-                    sh """
-                        set -euo pipefail
-                        docker tag "\${WHANOS_IMAGE_REF}" "\${WHANOS_IMAGE_REF_LATEST}"
-                        docker push "\${WHANOS_IMAGE_REF_LATEST}"
-                    """
+                    withEnv(['DOCKER_BUILDKIT=1']) {
+                        sh """
+                            set -euo pipefail
+                            docker tag "\${WHANOS_IMAGE_REF}" "\${WHANOS_IMAGE_REF_LATEST}"
+                            docker push "\${WHANOS_IMAGE_REF_LATEST}"
+                        """
+                    }
                 }
             }
         }
@@ -148,7 +153,9 @@ pipeline {
         }
         cleanup {
             ansiColor('xterm') {
-                sh 'docker image prune -f || true'
+                withEnv(['DOCKER_BUILDKIT=1']) {
+                    sh 'docker image prune -f || true'
+                }
             }
         }
     }
