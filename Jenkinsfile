@@ -3,7 +3,6 @@ pipeline {
 
     options {
         timestamps()
-        ansiColor('xterm')
         buildDiscarder(logRotator(numToKeepStr: '25', daysToKeepStr: '14', artifactNumToKeepStr: '5'))
     }
 
@@ -78,48 +77,50 @@ pipeline {
 
         stage('Build and push image') {
             steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'whanos-registry-creds',
-                        usernameVariable: 'WHANOS_REGISTRY_USERNAME',
-                        passwordVariable: 'WHANOS_REGISTRY_PASSWORD'
-                    )
-                ]) {
-                    script {
-                        def shellQuote = { String value ->
-                            if (!value) {
-                                return "''"
+                ansiColor('xterm') {
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: 'whanos-registry-creds',
+                            usernameVariable: 'WHANOS_REGISTRY_USERNAME',
+                            passwordVariable: 'WHANOS_REGISTRY_PASSWORD'
+                        )
+                    ]) {
+                        script {
+                            def shellQuote = { String value ->
+                                if (!value) {
+                                    return "''"
+                                }
+                                return "'" + value.replace("'", "'\"'\"'") + "'"
                             }
-                            return "'" + value.replace("'", "'\"'\"'") + "'"
+
+                            def additionalArgs = params.ADDITIONAL_BUILD_ARGS
+                                .split("\\r?\\n")
+                                .findAll { it?.trim() }
+                                .collect { it.trim() }
+
+                            def commandParts = [
+                                "python3",
+                                "orchestrator/main.py",
+                                "--repo ${shellQuote("${WORKSPACE}/app")}",
+                                "--image ${shellQuote(env.WHANOS_IMAGE_REF)}",
+                                "--registry ${shellQuote(env.REGISTRY_HOST)}"
+                            ]
+
+                            if (params.SKIP_TESTS) {
+                                commandParts << "--skip-tests"
+                            }
+
+                            additionalArgs.each { value ->
+                                commandParts << "--build-arg ${shellQuote(value)}"
+                            }
+
+                            def command = commandParts.join(" \\\n                              ")
+
+                            sh """
+                                set -euo pipefail
+                                ${command}
+                            """
                         }
-
-                        def additionalArgs = params.ADDITIONAL_BUILD_ARGS
-                            .split("\\r?\\n")
-                            .findAll { it?.trim() }
-                            .collect { it.trim() }
-
-                        def commandParts = [
-                            "python3",
-                            "orchestrator/main.py",
-                            "--repo ${shellQuote("${WORKSPACE}/app")}",
-                            "--image ${shellQuote(env.WHANOS_IMAGE_REF)}",
-                            "--registry ${shellQuote(env.REGISTRY_HOST)}"
-                        ]
-
-                        if (params.SKIP_TESTS) {
-                            commandParts << "--skip-tests"
-                        }
-
-                        additionalArgs.each { value ->
-                            commandParts << "--build-arg ${shellQuote(value)}"
-                        }
-
-                        def command = commandParts.join(" \\\n                              ")
-
-                        sh """
-                            set -euo pipefail
-                            ${command}
-                        """
                     }
                 }
             }
@@ -127,11 +128,13 @@ pipeline {
 
         stage('Tag latest for branch') {
             steps {
-                sh """
-                    set -euo pipefail
-                    docker tag "\${WHANOS_IMAGE_REF}" "\${WHANOS_IMAGE_REF_LATEST}"
-                    docker push "\${WHANOS_IMAGE_REF_LATEST}"
-                """
+                ansiColor('xterm') {
+                    sh """
+                        set -euo pipefail
+                        docker tag "\${WHANOS_IMAGE_REF}" "\${WHANOS_IMAGE_REF_LATEST}"
+                        docker push "\${WHANOS_IMAGE_REF_LATEST}"
+                    """
+                }
             }
         }
     }
@@ -144,7 +147,9 @@ pipeline {
             echo "❌ Whanos build failed. Inspect the stage logs."
         }
         cleanup {
-            sh 'docker image prune -f || true'
+            ansiColor('xterm') {
+                sh 'docker image prune -f || true'
+            }
         }
     }
 }

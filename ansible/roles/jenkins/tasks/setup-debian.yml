@@ -35,6 +35,22 @@
     state: started
     enabled: true
 
+- name: Add jenkins user to docker group (Debian)
+  ansible.builtin.user:
+    name: jenkins
+    groups: docker
+    append: true
+
+- name: Configure Docker daemon to allow insecure registry (Debian)
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    content: |
+      {
+        "insecure-registries": ["{{ whanos_registry_host }}:443", "{{ whanos_registry_host }}"]
+      }
+    mode: "0644"
+  notify: Restart docker
+
 - name: Install Jenkins dependencies (Debian)
   ansible.builtin.apt:
     name:

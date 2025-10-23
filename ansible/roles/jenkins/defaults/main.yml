@@ -11,11 +11,12 @@ jenkins_plugins:
   - docker-workflow
   - kubernetes-cli
   - job-dsl
+  - ansicolor
   - timestamper
 jenkins_seed_jobs:
   - name: whanos-orchestrator
     script_path: Jenkinsfile
-    git_url: "https://github.com/RaresFZ/images.git"
+    git_url: "git@github.com:RaresFZ/whanos.git"
     git_branch: "main"
 jenkins_registry_username: ci
 jenkins_registry_password: changeme
