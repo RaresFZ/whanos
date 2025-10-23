@@ -86,15 +86,20 @@ pipeline {
         stage('Build and push image') {
             steps {
                 ansiColor('xterm') {
-                    withCredentials([
-                        usernamePassword(
-                            credentialsId: 'whanos-registry-creds',
-                            usernameVariable: 'WHANOS_REGISTRY_USERNAME',
-                            passwordVariable: 'WHANOS_REGISTRY_PASSWORD'
-                        )
-                    ]) {
-                        withEnv(['DOCKER_BUILDKIT=1']) {
-                            script {
+                    script {
+                        def buildxAvailable = (sh(script: "docker buildx version >/dev/null 2>&1", returnStatus: true) == 0)
+                        if (!buildxAvailable) {
+                            echo "Buildx not available; building with classic docker builder."
+                        }
+                        def buildEnv = buildxAvailable ? ['DOCKER_BUILDKIT=1'] : []
+                        withCredentials([
+                            usernamePassword(
+                                credentialsId: 'whanos-registry-creds',
+                                usernameVariable: 'WHANOS_REGISTRY_USERNAME',
+                                passwordVariable: 'WHANOS_REGISTRY_PASSWORD'
+                            )
+                        ]) {
+                            withEnv(buildEnv) {
                                 def shellQuote = { String value ->
                                     if (!value) {
                                         return "''"
@@ -139,13 +144,11 @@ pipeline {
         stage('Tag latest for branch') {
             steps {
                 ansiColor('xterm') {
-                    withEnv(['DOCKER_BUILDKIT=1']) {
-                        sh """
-                            set -euo pipefail
-                            docker tag "\${WHANOS_IMAGE_REF}" "\${WHANOS_IMAGE_REF_LATEST}"
-                            docker push "\${WHANOS_IMAGE_REF_LATEST}"
-                        """
-                    }
+                    sh """
+                        set -euo pipefail
+                        docker tag "\${WHANOS_IMAGE_REF}" "\${WHANOS_IMAGE_REF_LATEST}"
+                        docker push "\${WHANOS_IMAGE_REF_LATEST}"
+                    """
                 }
             }
         }
@@ -160,9 +163,7 @@ pipeline {
         }
         cleanup {
             ansiColor('xterm') {
-                withEnv(['DOCKER_BUILDKIT=1']) {
-                    sh 'docker image prune -f || true'
-                }
+                sh 'docker image prune -f || true'
             }
         }
     }
