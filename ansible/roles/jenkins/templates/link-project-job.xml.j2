@@ -72,19 +72,113 @@ pipelineJob("Projects/${jobName}") {
     }
     
     definition {
-        cpsScm {
-            scm {
-                git {
-                    remote {
-                        url(repoUrl)
-                        if (credentialsId) {
-                            credentials(credentialsId)
-                        }
+        cps {
+            script("""
+pipeline {
+    agent any
+    
+    environment {
+        REGISTRY_HOST = '{{ registry_hostname | default("registry.whanos.example.com") }}'
+        REGISTRY_USER = '{{ registry_username | default("ci") }}'
+        REGISTRY_PASS = '{{ registry_password | default("changeme") }}'
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout([
+                    \$class: 'GitSCM',
+                    branches: [[name: '${branch}']],
+                    userRemoteConfigs: [[
+                        url: '${repoUrl}'
+                        ${credentialsId ? ", credentialsId: '${credentialsId}'" : ''}
+                    ]]
+                ])
+            }
+        }
+        
+        stage('Detect Language') {
+            steps {
+                script {
+                    if (fileExists('Makefile')) {
+                        env.LANGUAGE = 'c'
+                    } else if (fileExists('app/pom.xml')) {
+                        env.LANGUAGE = 'java'
+                    } else if (fileExists('package.json')) {
+                        env.LANGUAGE = 'javascript'
+                    } else if (fileExists('requirements.txt')) {
+                        env.LANGUAGE = 'python'
+                    } else if (fileExists('app/main.bf')) {
+                        env.LANGUAGE = 'befunge'
+                    } else {
+                        error('No supported language detected in repository')
                     }
-                    branches(branch)
+                    echo "Detected language: \${env.LANGUAGE}"
                 }
             }
-            scriptPath('Jenkinsfile')
+        }
+        
+        stage('Build Image') {
+            steps {
+                script {
+                    def imageName = "\${env.REGISTRY_HOST}/${jobName}:\${env.BUILD_NUMBER}"
+                    
+                    if (fileExists('Dockerfile')) {
+                        // Custom Dockerfile exists - user wants to customize the base image
+                        sh "docker build -t \${imageName} ."
+                    } else {
+                        // No custom Dockerfile - use standalone Whanos image
+                        // Clone Whanos repo to get the standalone Dockerfile
+                        sh \"\"\"
+                            git clone --depth 1 --branch {{ whanos_git_branch | default('main') }} {{ whanos_git_repo | default('https://github.com/RaresFZ/whanos.git') }} /tmp/whanos-\${BUILD_NUMBER}
+                            docker build -t \${imageName} -f /tmp/whanos-\${BUILD_NUMBER}/images/\${env.LANGUAGE}/Dockerfile.standalone .
+                            rm -rf /tmp/whanos-\${BUILD_NUMBER}
+                        \"\"\"
+                    }
+                    
+                    env.IMAGE_NAME = imageName
+                }
+            }
+        }
+        
+        stage('Push Image') {
+            steps {
+                script {
+                    sh \"\"\"
+                        echo "\${env.REGISTRY_PASS}" | docker login -u "\${env.REGISTRY_USER}" --password-stdin "\${env.REGISTRY_HOST}"
+                        docker push "\${env.IMAGE_NAME}"
+                        docker logout "\${env.REGISTRY_HOST}"
+                    \"\"\"
+                }
+            }
+        }
+        
+        stage('Deploy to Kubernetes') {
+            when {
+                expression { fileExists('whanos.yml') }
+            }
+            steps {
+                script {
+                    sh \"\"\"
+                        python3 /whanos/kubernetes/render_deployment.py \\
+                            --image "\${env.IMAGE_NAME}" \\
+                            --name "${jobName}" \\
+                            --whanos-file whanos.yml \\
+                            | kubectl apply -f - -n whanos-cicd
+                    \"\"\"
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            deleteDir()
+        }
+    }
+}
+            """)
+            sandbox(true)
         }
     }
 }
