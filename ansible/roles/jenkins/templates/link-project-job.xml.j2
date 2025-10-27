@@ -164,29 +164,29 @@ pipeline {
                     def ports = sh(script: 'grep -A 10 "^  ports:" whanos.yml | grep -E "^    - " | sed "s/^    - //" | tr "\\\\n" "," || echo ""', returnStdout: true).trim()
                     
                     // Generate basic deployment manifest
-                    def manifest = $/
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: ${jobName}
-  namespace: whanos-cicd
-spec:
-  replicas: /$/ + replicas + $/
-  selector:
-    matchLabels:
-      app: ${jobName}
-  template:
-    metadata:
-      labels:
-        app: ${jobName}
-    spec:
-      imagePullSecrets:
-        - name: registry-credentials
-      containers:
-        - name: ${jobName}
-          image: /$/ + env.IMAGE_NAME + $/
-          imagePullPolicy: Always
-/$/
+                    def manifest = """
+                        apiVersion: apps/v1
+                        kind: Deployment
+                        metadata:
+                          name: ${jobName}
+                          namespace: whanos-cicd
+                        spec:
+                          replicas: ${replicas}
+                          selector:
+                            matchLabels:
+                              app: ${jobName}
+                          template:
+                            metadata:
+                              labels:
+                                app: ${jobName}
+                            spec:
+                              imagePullSecrets:
+                                - name: registry-credentials
+                              containers:
+                                - name: ${jobName}
+                                  image: ${env.IMAGE_NAME}
+                                  imagePullPolicy: Always
+                    """.stripIndent()
                     
                     // Add ports if any
                     if (ports) {
@@ -232,18 +232,18 @@ spec:
                     
                     // Create service if ports exist
                     if (ports) {
-                        def serviceManifest = $/
-apiVersion: v1
-kind: Service
-metadata:
-  name: ${jobName}
-  namespace: whanos-cicd
-spec:
-  type: NodePort
-  selector:
-    app: ${jobName}
-  ports:
-/$/
+                        def serviceManifest = """
+                            apiVersion: v1
+                            kind: Service
+                            metadata:
+                              name: ${jobName}
+                              namespace: whanos-cicd
+                            spec:
+                              type: NodePort
+                              selector:
+                                app: ${jobName}
+                              ports:
+                        """.stripIndent()
                         ports.split(',').findAll { it }.each { port ->
                             serviceManifest += "    - port: " + port.trim() + "\\\\n      targetPort: " + port.trim() + "\\\\n      protocol: TCP\\\\n"
                         }
