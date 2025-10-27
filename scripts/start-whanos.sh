@@ -80,8 +80,14 @@ fi
 
 if [[ $SKIP_RBAC -eq 0 ]]; then
   require_cmd kubectl
-  if [[ -z "${KUBECONFIG:-}" && -f /etc/kubernetes/admin.conf ]]; then
-    export KUBECONFIG=/etc/kubernetes/admin.conf
+  if [[ -z "${KUBECONFIG:-}" ]]; then
+    if [[ -f "$HOME/.kube/config" ]]; then
+      export KUBECONFIG="$HOME/.kube/config"
+    elif [[ -f /etc/kubernetes/admin.conf && -r /etc/kubernetes/admin.conf ]]; then
+      export KUBECONFIG=/etc/kubernetes/admin.conf
+    else
+      echo "Warning: no readable kubeconfig found; kubectl may fail. Create ~/.kube/config or set KUBECONFIG explicitly." >&2
+    fi
   fi
 fi
 
@@ -120,9 +126,9 @@ fi
 if [[ $SKIP_RBAC -eq 0 ]]; then
   # Use the user's kubeconfig if available, otherwise use sudo to access admin.conf
   if [[ -f "$HOME/.kube/config" ]]; then
-    run_cmd "Applying Jenkins deployer RBAC" kubectl apply -f "$K8S_RBAC"
+    run_cmd "Applying Jenkins deployer RBAC" env KUBECONFIG="$HOME/.kube/config" kubectl apply -f "$K8S_RBAC"
   else
-    run_cmd "Applying Jenkins deployer RBAC" sudo kubectl apply -f "$K8S_RBAC"
+    run_cmd "Applying Jenkins deployer RBAC" sudo KUBECONFIG=/etc/kubernetes/admin.conf kubectl apply -f "$K8S_RBAC"
   fi
 fi
 
