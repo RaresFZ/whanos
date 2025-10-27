@@ -182,6 +182,12 @@
     state: restarted
     enabled: true
 
+- name: Ensure containerd is running and enabled
+  ansible.builtin.service:
+    name: containerd
+    state: started
+    enabled: true
+
 - name: Add Kubernetes apt key
   ansible.builtin.apt_key:
     url: https://packages.cloud.google.com/apt/doc/apt-key.gpg

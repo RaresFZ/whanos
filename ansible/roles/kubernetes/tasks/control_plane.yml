@@ -64,6 +64,55 @@
     msg: "Cannot use 127.0.0.1 or localhost as API server address. Please set kubernetes_api_advertise_address to a valid IP."
   when: k8s_advertise_address in ['127.0.0.1', 'localhost']
 
+- name: Configure containerd to use registry certs directory
+  ansible.builtin.shell: |
+    if [ ! -f /etc/containerd/config.toml ]; then
+      mkdir -p /etc/containerd
+      containerd config default | tee /etc/containerd/config.toml > /dev/null
+    fi
+    sed -i "s|config_path = ''|config_path = '/etc/containerd/certs.d'|g" /etc/containerd/config.toml
+  args:
+    creates: /etc/containerd/.whanos-registry-configured
+  register: containerd_config
+  notify: restart containerd
+
+- name: Create registry certificate directory for containerd
+  ansible.builtin.file:
+    path: "/etc/containerd/certs.d/{{ registry_hostname | default('registry.whanos.example.com') }}"
+    state: directory
+    mode: "0755"
+
+- name: Configure containerd to skip TLS verification for local registry
+  ansible.builtin.copy:
+    dest: "/etc/containerd/certs.d/{{ registry_hostname | default('registry.whanos.example.com') }}/hosts.toml"
+    mode: "0644"
+    content: |
+      server = "https://{{ registry_hostname | default('registry.whanos.example.com') }}"
+
+      [host."https://{{ registry_hostname | default('registry.whanos.example.com') }}"]
+        skip_verify = true
+  notify: restart containerd
+
+- name: Create marker file for containerd registry configuration
+  ansible.builtin.file:
+    path: /etc/containerd/.whanos-registry-configured
+    state: touch
+    mode: "0644"
+
+- name: Force restart containerd if configuration changed
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for containerd to be ready after restart
+  ansible.builtin.pause:
+    seconds: 5
+  when: containerd_config.changed
+
+- name: Ensure kubelet is started
+  ansible.builtin.service:
+    name: kubelet
+    state: started
+    enabled: true
+
 - name: Initialise Kubernetes control plane
   ansible.builtin.command: >
     kubeadm init
@@ -71,6 +120,17 @@
     --pod-network-cidr {{ kubernetes_pod_network_cidr }}
     --service-cidr {{ kubernetes_service_cidr }}
   when: not kubeadm_admin_conf.stat.exists
+  register: kubeadm_init
+
+- name: Wait for Kubernetes API server to be ready
+  ansible.builtin.command: kubectl get --raw /healthz
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: api_health
+  until: api_health.rc == 0
+  retries: 30
+  delay: 2
+  changed_when: false
 
 - name: Ensure kubeconfig directory exists
   ansible.builtin.file:
@@ -117,3 +177,45 @@
   when: 
     - groups['k8s_workers'] | default([]) | length > 0
     - join_command.rc == 0
+
+- name: Create imagePullSecrets for default namespace
+  ansible.builtin.shell: |
+    kubectl create secret docker-registry registry-credentials \
+      --docker-server={{ registry_hostname | default('registry.whanos.example.com') }} \
+      --docker-username={{ registry_username | default('ci') }} \
+      --docker-password={{ registry_password | default('changeme') }} \
+      --docker-email=ci@whanos.local \
+      --dry-run=client -o yaml | kubectl apply -f -
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: registry_secret
+  changed_when: "'created' in registry_secret.stdout or 'configured' in registry_secret.stdout"
+
+- name: Create imagePullSecrets for whanos-cicd namespace
+  ansible.builtin.shell: |
+    kubectl create namespace whanos-cicd --dry-run=client -o yaml | kubectl apply -f -
+    kubectl create secret docker-registry registry-credentials \
+      --namespace=whanos-cicd \
+      --docker-server={{ registry_hostname | default('registry.whanos.example.com') }} \
+      --docker-username={{ registry_username | default('ci') }} \
+      --docker-password={{ registry_password | default('changeme') }} \
+      --docker-email=ci@whanos.local \
+      --dry-run=client -o yaml | kubectl apply -f -
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: registry_secret_cicd
+  changed_when: "'created' in registry_secret_cicd.stdout or 'configured' in registry_secret_cicd.stdout"
+
+- name: Remove control-plane taint for single-node scheduling
+  ansible.builtin.shell: |
+    kubectl taint nodes --all node-role.kubernetes.io/control-plane- || true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: taint_removal
+  changed_when: "'untainted' in taint_removal.stdout"
+
+- name: Ensure kubelet is running and enabled
+  ansible.builtin.service:
+    name: kubelet
+    state: started
+    enabled: true

@@ -1,18 +1,71 @@
 # Whanos Infrastructure
 
-This documentation folder will collect the operational notes, architecture decisions, and usage guides required to operate the Whanos infrastructure.
+**Automatically deploy (nearly) anything with a snap!**
 
-## Architecture overview
+Whanos is a complete CI/CD infrastructure that combines Docker, Jenkins, Ansible, and Kubernetes to automatically containerize and deploy applications with zero manual intervention.
 
-- **Source control:** Developers push Whanos-compatible repositories (one app per repo) to Git hosting.
-- **CI/CD (Jenkins):** A parameterised pipeline (`Jenkinsfile`) checks out both infrastructure and application repositories, runs the Whanos orchestrator, and publishes images into the private registry.
-- **Registry:** The hardened Docker registry stores both base images (`whanos-*`) and application artefacts under `whanos/apps/<repo>:<tag>`.
-- **Deployment tooling:** The Jenkins pipeline or operators call `kubernetes/render_deployment.py` (via `bin/whanos-deploy`) to translate `whanos.yml` into Kubernetes manifests with RBAC scoped to the app namespace.
-- **Kubernetes cluster:** A kubeadm-based cluster (1 control plane + ≥2 workers) runs the applications. Namespaces (`whanos-<app>`) isolate workloads, with shared CICD namespace `whanos-cicd` hosting the deployer ServiceAccount.
+## 📚 Documentation Index
 
-High-level flow: `git push` → Jenkins build → orchestrator detects language & builds image → image pushed to registry → manifests rendered → `kubectl apply` deploys or updates the app in Kubernetes.
+- **[Quick Start Guide](quick-start.md)** - Get started with Whanos in minutes
+- **[Automated Deployment](automated-deployment.md)** - What's automated and how it works
+- **[Requirements Compliance](requirements-compliance.md)** - Full checklist vs. project requirements
+- **[Provisioning Guide](provisioning.md)** - Infrastructure deployment details
+- **[Kubernetes Setup](kubernetes.md)** - K8s cluster configuration
+- **[Registry Setup](registry.md)** - Docker registry details
+- **[Security Guide](security.md)** - Security hardening and best practices
 
-## Base images overview
+## 🚀 What is Whanos?
+
+Whanos automatically:
+1. ✅ Detects your application's language (C, Java, JavaScript, Python, Befunge)
+2. ✅ Builds a Docker image using pre-configured base images
+3. ✅ Pushes the image to a private registry
+4. ✅ Deploys to Kubernetes (if whanos.yml exists)
+5. ✅ Polls your repository every minute for changes
+
+All you need to do is **push to Git**!
+
+## 🏗️ Architecture overview
+
+```
+Developer Push → Jenkins (link-project) → Auto-detect Language → Build Image → Registry → Kubernetes
+                      ↓
+                 Poll every minute
+                      ↓
+                 Automatic rebuild on changes
+```
+
+- **Source control:** Developers push Whanos-compatible repositories to Git
+- **CI/CD (Jenkins):** Automated job structure with folders and dynamic job creation
+  - `Whanos base images/` - Contains base image build jobs for each language
+  - `Projects/` - Dynamically created jobs for linked repositories  
+  - `link-project` - Job that creates new CI/CD pipelines
+- **Registry:** Private Docker registry (registry.whanos.example.com) with TLS and authentication
+- **Kubernetes:** Automated deployment with imagePullSecrets, containerd configuration, and RBAC
+- **Deployment tooling:** `kubernetes/render_deployment.py` translates `whanos.yml` into K8s manifests
+
+## 🎯 Key Features (Fully Automated)
+
+### Jenkins Structure
+- ✅ **Folders**: `Whanos base images/` and `Projects/` auto-created
+- ✅ **link-project job**: Dynamically creates CI/CD jobs for repositories
+- ✅ **Base image jobs**: One job per language (whanos-c, whanos-java, etc.)
+- ✅ **Build all base images**: Triggers all base image builds
+- ✅ **SCM Polling**: Every created job polls every minute (`* * * * *`)
+- ✅ **Security**: Admin user (admin/changeme), sign-up disabled
+
+### Kubernetes Integration
+- ✅ **Containerd configuration**: Automatically configured to trust registry
+- ✅ **imagePullSecrets**: Auto-created in default and whanos-cicd namespaces
+- ✅ **Single-node scheduling**: Control-plane taint removed automatically
+- ✅ **RBAC**: Proper service accounts and permissions
+
+### Registry
+- ✅ **Authentication**: HTTP basic auth (ci/changeme)
+- ✅ **TLS**: Self-signed certificates (configurable for Let's Encrypt)
+- ✅ **Integration**: Jenkins credentials auto-configured
+
+## 📦 Supported Languages
 
 | Language   | Base tag        | Build expectation                                                                | Default runtime command                     |
 |------------|-----------------|----------------------------------------------------------------------------------|---------------------------------------------|

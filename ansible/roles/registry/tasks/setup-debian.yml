@@ -29,6 +29,12 @@
       - docker-compose-plugin
     state: present
 
+- name: Ensure containerd is running (Debian)
+  ansible.builtin.service:
+    name: containerd
+    state: started
+    enabled: true
+
 - name: Ensure Docker service is running (Debian)
   ansible.builtin.service:
     name: docker

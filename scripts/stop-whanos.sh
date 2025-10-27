@@ -10,7 +10,8 @@ Gracefully stops Whanos infrastructure components via Ansible ad-hoc commands.
 Options:
   --skip-jenkins        Do not stop/disable the Jenkins service.
   --skip-registry       Do not stop the Docker registry stack.
-  --reset-k8s           Run 'kubeadm reset -f' on all Kubernetes nodes (destructive).
+  --skip-k8s            Do not stop Kubernetes services (kubelet). Note: containerd is left running for Docker.
+  --reset-k8s           Run 'kubeadm reset -f' on all Kubernetes nodes and stop containerd (destructive).
   --purge-registry-data Remove registry data directory after stopping (requires --purge-registry-data).
   --dry-run             Print commands instead of executing them.
   -h, --help            Show this help.
@@ -44,6 +45,7 @@ run_cmd() {
 
 SKIP_JENKINS=0
 SKIP_REGISTRY=0
+SKIP_K8S=0
 RESET_K8S=0
 PURGE_REG_DATA=0
 DRY_RUN=0
@@ -52,6 +54,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --skip-jenkins) SKIP_JENKINS=1; shift ;;
     --skip-registry) SKIP_REGISTRY=1; shift ;;
+    --skip-k8s) SKIP_K8S=1; shift ;;
     --reset-k8s) RESET_K8S=1; shift ;;
     --purge-registry-data) PURGE_REG_DATA=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
@@ -89,7 +92,53 @@ if [[ $SKIP_REGISTRY -eq 0 ]]; then
   fi
 fi
 
+if [[ $SKIP_K8S -eq 0 ]]; then
+  run_cmd "Stopping kubelet service" ansible \
+    -i "$INVENTORY" \
+    k8s_control_plane:k8s_workers \
+    -b \
+    -m ansible.builtin.service \
+    -a "name=kubelet state=stopped"
+
+  run_cmd "Waiting for pods to terminate" ansible \
+    -i "$INVENTORY" \
+    k8s_control_plane:k8s_workers \
+    -b \
+    -m ansible.builtin.shell \
+    -a "sleep 5"
+
+  run_cmd "Stopping all remaining Kubernetes containers" ansible \
+    -i "$INVENTORY" \
+    k8s_control_plane:k8s_workers \
+    -b \
+    -m ansible.builtin.shell \
+    -a "crictl --runtime-endpoint unix:///run/containerd/containerd.sock stop \$(crictl --runtime-endpoint unix:///run/containerd/containerd.sock ps -q 2>/dev/null) 2>/dev/null || true"
+
+  run_cmd "Disabling kubelet service" ansible \
+    -i "$INVENTORY" \
+    k8s_control_plane:k8s_workers \
+    -b \
+    -m ansible.builtin.service \
+    -a "name=kubelet enabled=no"
+
+  echo "Note: containerd is left running for Docker (registry). Use --reset-k8s to fully reset."
+fi
+
 if [[ $RESET_K8S -eq 1 ]]; then
+  run_cmd "Stopping kubelet (for reset)" ansible \
+    -i "$INVENTORY" \
+    k8s_control_plane:k8s_workers \
+    -b \
+    -m ansible.builtin.service \
+    -a "name=kubelet state=stopped enabled=no"
+
+  run_cmd "Stopping containerd (for reset)" ansible \
+    -i "$INVENTORY" \
+    k8s_control_plane:k8s_workers \
+    -b \
+    -m ansible.builtin.service \
+    -a "name=containerd state=stopped enabled=no"
+
   run_cmd "Resetting Kubernetes workers" ansible \
     -i "$INVENTORY" \
     k8s_workers \

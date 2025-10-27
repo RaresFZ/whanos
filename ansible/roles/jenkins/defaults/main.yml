@@ -13,6 +13,8 @@ jenkins_plugins:
   - job-dsl
   - ansicolor
   - timestamper
+  - parameterized-trigger
+  - cloudbees-folder
 jenkins_seed_jobs:
   - name: whanos-orchestrator
     script_path: Jenkinsfile
@@ -21,3 +23,11 @@ jenkins_seed_jobs:
 jenkins_registry_username: ci
 jenkins_registry_password: changeme
 jenkins_cli_jar: /var/lib/jenkins/jenkins-cli.jar
+whanos_git_repo: "https://github.com/RaresFZ/whanos.git"
+whanos_git_branch: "main"
+whanos_languages:
+  - c
+  - java
+  - javascript
+  - python
+  - befunge

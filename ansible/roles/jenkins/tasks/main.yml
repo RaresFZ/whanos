@@ -346,6 +346,125 @@
   loop_control:
     label: "{{ item.name }}"
 
+- name: Create Whanos base images folder
+  ansible.builtin.template:
+    src: folder-config.xml.j2
+    dest: /tmp/whanos-base-images-folder.xml
+  vars:
+    folder_description: "Whanos base images for different programming languages"
+
+- name: Apply Whanos base images folder
+  ansible.builtin.shell: |
+    set -euo pipefail
+    java -jar {{ jenkins_cli_jar }} \
+      -s http://localhost:{{ jenkins_http_port }}/ \
+      -auth @/var/lib/jenkins/whanos-admin.txt \
+      -http delete-job "Whanos base images" || true
+    java -jar {{ jenkins_cli_jar }} \
+      -s http://localhost:{{ jenkins_http_port }}/ \
+      -auth @/var/lib/jenkins/whanos-admin.txt \
+      -http create-job "Whanos base images" < /tmp/whanos-base-images-folder.xml
+  args:
+    executable: /bin/bash
+
+- name: Create Projects folder
+  ansible.builtin.template:
+    src: folder-config.xml.j2
+    dest: /tmp/projects-folder.xml
+  vars:
+    folder_description: "Whanos project builds"
+
+- name: Apply Projects folder
+  ansible.builtin.shell: |
+    set -euo pipefail
+    java -jar {{ jenkins_cli_jar }} \
+      -s http://localhost:{{ jenkins_http_port }}/ \
+      -auth @/var/lib/jenkins/whanos-admin.txt \
+      -http delete-job "Projects" || true
+    java -jar {{ jenkins_cli_jar }} \
+      -s http://localhost:{{ jenkins_http_port }}/ \
+      -auth @/var/lib/jenkins/whanos-admin.txt \
+      -http create-job "Projects" < /tmp/projects-folder.xml
+  args:
+    executable: /bin/bash
+
+- name: Create base image build jobs
+  ansible.builtin.template:
+    src: base-image-job.xml.j2
+    dest: "/tmp/whanos-{{ item }}-job.xml"
+  loop: "{{ whanos_languages }}"
+  vars:
+    language: "{{ item }}"
+
+- name: Apply base image build jobs
+  ansible.builtin.shell: |
+    set -euo pipefail
+    java -jar {{ jenkins_cli_jar }} \
+      -s http://localhost:{{ jenkins_http_port }}/ \
+      -auth @/var/lib/jenkins/whanos-admin.txt \
+      -http delete-job "Whanos base images/whanos-{{ item }}" || true
+    java -jar {{ jenkins_cli_jar }} \
+      -s http://localhost:{{ jenkins_http_port }}/ \
+      -auth @/var/lib/jenkins/whanos-admin.txt \
+      -http create-job "Whanos base images/whanos-{{ item }}" < /tmp/whanos-{{ item }}-job.xml
+  args:
+    executable: /bin/bash
+  loop: "{{ whanos_languages }}"
+
+- name: Create Build all base images job
+  ansible.builtin.template:
+    src: build-all-base-images-job.xml.j2
+    dest: /tmp/build-all-base-images-job.xml
+
+- name: Apply Build all base images job
+  ansible.builtin.shell: |
+    set -euo pipefail
+    java -jar {{ jenkins_cli_jar }} \
+      -s http://localhost:{{ jenkins_http_port }}/ \
+      -auth @/var/lib/jenkins/whanos-admin.txt \
+      -http delete-job "Whanos base images/Build all base images" || true
+    java -jar {{ jenkins_cli_jar }} \
+      -s http://localhost:{{ jenkins_http_port }}/ \
+      -auth @/var/lib/jenkins/whanos-admin.txt \
+      -http create-job "Whanos base images/Build all base images" < /tmp/build-all-base-images-job.xml
+  args:
+    executable: /bin/bash
+
+- name: Create link-project job
+  ansible.builtin.template:
+    src: link-project-job.xml.j2
+    dest: /tmp/link-project-job.xml
+
+- name: Apply link-project job
+  ansible.builtin.shell: |
+    set -euo pipefail
+    java -jar {{ jenkins_cli_jar }} \
+      -s http://localhost:{{ jenkins_http_port }}/ \
+      -auth @/var/lib/jenkins/whanos-admin.txt \
+      -http delete-job "link-project" || true
+    java -jar {{ jenkins_cli_jar }} \
+      -s http://localhost:{{ jenkins_http_port }}/ \
+      -auth @/var/lib/jenkins/whanos-admin.txt \
+      -http create-job "link-project" < /tmp/link-project-job.xml
+  args:
+    executable: /bin/bash
+
+- name: Clean up folder and job configuration files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/whanos-base-images-folder.xml
+    - /tmp/projects-folder.xml
+    - /tmp/build-all-base-images-job.xml
+    - /tmp/link-project-job.xml
+
+- name: Clean up individual base image job configuration files
+  ansible.builtin.file:
+    path: "/tmp/whanos-{{ item }}-job.xml"
+    state: absent
+  loop: "{{ whanos_languages }}"
+
 - name: Build Whanos base images
   ansible.builtin.shell: |
     set -euo pipefail

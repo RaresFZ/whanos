@@ -1,0 +1,105 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<project>
+  <description>Creates a new Whanos CI/CD job for a given Git repository</description>
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <hudson.model.ParametersDefinitionProperty>
+      <parameterDefinitions>
+        <hudson.model.StringParameterDefinition>
+          <name>REPOSITORY_URL</name>
+          <description>Git repository URL (e.g., https://github.com/user/repo.git)</description>
+          <defaultValue></defaultValue>
+          <trim>true</trim>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>REPOSITORY_NAME</name>
+          <description>Friendly name for the repository (will be used as job name)</description>
+          <defaultValue></defaultValue>
+          <trim>true</trim>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>BRANCH</name>
+          <description>Git branch to monitor (default: main)</description>
+          <defaultValue>main</defaultValue>
+          <trim>true</trim>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>CREDENTIALS_ID</name>
+          <description>Jenkins credentials ID for private repositories (leave empty for public repos)</description>
+          <defaultValue></defaultValue>
+          <trim>true</trim>
+        </hudson.model.StringParameterDefinition>
+      </parameterDefinitions>
+    </hudson.model.ParametersDefinitionProperty>
+  </properties>
+  <scm class="hudson.scm.NullSCM"/>
+  <canRoam>true</canRoam>
+  <disabled>false</disabled>
+  <blockBuildWhenDownstreamBuilding>false</blockBuildWhenDownstreamBuilding>
+  <blockBuildWhenUpstreamBuilding>false</blockBuildWhenUpstreamBuilding>
+  <triggers/>
+  <concurrentBuild>false</concurrentBuild>
+  <builders>
+    <javaposse.jobdsl.plugin.ExecuteDslScripts plugin="job-dsl">
+      <targets>create_project_job.groovy</targets>
+      <usingScriptText>true</usingScriptText>
+      <scriptText><![CDATA[
+def repoUrl = binding.variables['REPOSITORY_URL'] ?: ''
+def repoName = binding.variables['REPOSITORY_NAME'] ?: ''
+def branch = binding.variables['BRANCH'] ?: 'main'
+def credentialsId = binding.variables['CREDENTIALS_ID'] ?: ''
+
+if (!repoUrl || !repoName) {
+    throw new IllegalArgumentException('REPOSITORY_URL and REPOSITORY_NAME are required')
+}
+
+// Sanitize job name
+def jobName = repoName.replaceAll(/[^A-Za-z0-9_-]/, '-')
+
+folder('Projects') {
+    description('Whanos project builds')
+}
+
+pipelineJob("Projects/${jobName}") {
+    description("Whanos CI/CD for ${repoUrl}")
+    
+    parameters {
+        stringParam('REGISTRY_HOST', '{{ registry_hostname | default("registry.whanos.example.com") }}', 'Docker registry host')
+    }
+    
+    triggers {
+        scm('* * * * *') // Poll SCM every minute
+    }
+    
+    definition {
+        cpsScm {
+            scm {
+                git {
+                    remote {
+                        url(repoUrl)
+                        if (credentialsId) {
+                            credentials(credentialsId)
+                        }
+                    }
+                    branches(branch)
+                }
+            }
+            scriptPath('Jenkinsfile')
+        }
+    }
+}
+      ]]></scriptText>
+      <ignoreExisting>false</ignoreExisting>
+      <ignoreMissingFiles>false</ignoreMissingFiles>
+      <failOnMissingPlugin>false</failOnMissingPlugin>
+      <failOnSeedCollision>false</failOnSeedCollision>
+      <unstableOnDeprecation>false</unstableOnDeprecation>
+      <removedJobAction>IGNORE</removedJobAction>
+      <removedViewAction>IGNORE</removedViewAction>
+      <removedConfigFilesAction>IGNORE</removedConfigFilesAction>
+      <lookupStrategy>JENKINS_ROOT</lookupStrategy>
+    </javaposse.jobdsl.plugin.ExecuteDslScripts>
+  </builders>
+  <publishers/>
+  <buildWrappers/>
+</project>

@@ -5,3 +5,6 @@ whanos_domain: whanos.example.com
 whanos_registry_host: registry.{{ whanos_domain }}
 whanos_jenkins_host: jenkins.{{ whanos_domain }}
 whanos_default_timezone: UTC
+registry_hostname: registry.whanos.example.com
+registry_username: ci
+registry_password: changeme
