@@ -159,13 +159,92 @@ pipeline {
             }
             steps {
                 script {
-                    sh \"\"\"
-                        python3 /whanos/kubernetes/render_deployment.py \\
-                            --image "\${env.IMAGE_NAME}" \\
-                            --name "${jobName}" \\
-                            --whanos-file whanos.yml \\
-                            | kubectl apply -f - -n whanos-cicd
-                    \"\"\"
+                    // Parse whanos.yml
+                    def whanosConfig = readYaml file: 'whanos.yml'
+                    def deployment = whanosConfig.deployment ?: [:]
+                    def replicas = deployment.replicas ?: 1
+                    def resources = deployment.resources ?: [:]
+                    def ports = deployment.ports ?: []
+                    
+                    // Generate Kubernetes manifest
+                    def manifest = \"\"\"
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${jobName}
+  namespace: whanos-cicd
+spec:
+  replicas: \${replicas}
+  selector:
+    matchLabels:
+      app: ${jobName}
+  template:
+    metadata:
+      labels:
+        app: ${jobName}
+    spec:
+      imagePullSecrets:
+        - name: registry-credentials
+      containers:
+        - name: ${jobName}
+          image: \${env.IMAGE_NAME}
+          imagePullPolicy: Always
+\"\"\"
+                    
+                    // Add ports if specified
+                    if (ports) {
+                        manifest += "          ports:\\n"
+                        ports.each { port ->
+                            manifest += "            - containerPort: \${port}\\n"
+                        }
+                    }
+                    
+                    // Add resources if specified
+                    if (resources) {
+                        manifest += "          resources:\\n"
+                        if (resources.requests) {
+                            manifest += "            requests:\\n"
+                            resources.requests.each { key, value ->
+                                manifest += "              \${key}: \${value}\\n"
+                            }
+                        }
+                        if (resources.limits) {
+                            manifest += "            limits:\\n"
+                            resources.limits.each { key, value ->
+                                manifest += "              \${key}: \${value}\\n"
+                            }
+                        }
+                    }
+                    
+                    // Apply the manifest
+                    writeFile file: 'deployment.yaml', text: manifest
+                    sh 'kubectl apply -f deployment.yaml -n whanos-cicd'
+                    
+                    // Create service if ports are specified
+                    if (ports) {
+                        def serviceManifest = \"\"\"
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${jobName}
+  namespace: whanos-cicd
+spec:
+  type: NodePort
+  selector:
+    app: ${jobName}
+  ports:
+\"\"\"
+                        ports.each { port ->
+                            serviceManifest += \"\"\"
+    - port: \${port}
+      targetPort: \${port}
+      protocol: TCP
+\"\"\"
+                        }
+                        
+                        writeFile file: 'service.yaml', text: serviceManifest
+                        sh 'kubectl apply -f service.yaml -n whanos-cicd'
+                    }
                 }
             }
         }
