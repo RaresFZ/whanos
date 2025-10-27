@@ -160,8 +160,8 @@ pipeline {
             steps {
                 script {
                     // Parse whanos.yml using shell commands
-                    def replicas = sh(script: 'grep -E "^  replicas:" whanos.yml | awk "{print \\$2}" || echo "1"', returnStdout: true).trim()
-                    def ports = sh(script: 'grep -A 10 "^  ports:" whanos.yml | grep -E "^    - " | sed "s/^    - //" | tr "\\n" "," || echo ""', returnStdout: true).trim()
+                    def replicas = sh(script: 'grep -E "^  replicas:" whanos.yml | awk "{print \\\\$2}" || echo "1"', returnStdout: true).trim()
+                    def ports = sh(script: 'grep -A 10 "^  ports:" whanos.yml | grep -E "^    - " | sed "s/^    - //" | tr "\\\\n" "," || echo ""', returnStdout: true).trim()
                     
                     // Generate basic deployment manifest
                     def manifest = """
@@ -190,38 +190,38 @@ spec:
                     
                     // Add ports if any
                     if (ports) {
-                        manifest += "          ports:\\n"
+                        manifest += "          ports:\\\\n"
                         ports.split(',').findAll { it }.each { port ->
-                            manifest += "            - containerPort: \${port.trim()}\\n"
+                            manifest += "            - containerPort: \${port.trim()}\\\\n"
                         }
                     }
                     
                     // Check for resource requests/limits
                     def hasResources = sh(script: 'grep -q "^  resources:" whanos.yml && echo "true" || echo "false"', returnStdout: true).trim()
                     if (hasResources == 'true') {
-                        manifest += "          resources:\\n"
+                        manifest += "          resources:\\\\n"
                         
                         def hasRequests = sh(script: 'grep -q "^    requests:" whanos.yml && echo "true" || echo "false"', returnStdout: true).trim()
                         if (hasRequests == 'true') {
-                            def memReq = sh(script: 'grep -A 5 "^    requests:" whanos.yml | grep "memory:" | head -1 | awk "{print \\$2}" | tr -d "\\"" || echo ""', returnStdout: true).trim()
-                            def cpuReq = sh(script: 'grep -A 5 "^    requests:" whanos.yml | grep "cpu:" | head -1 | awk "{print \\$2}" | tr -d "\\"" || echo ""', returnStdout: true).trim()
+                            def memReq = sh(script: 'grep -A 5 "^    requests:" whanos.yml | grep "memory:" | head -1 | awk "{print \\\\$2}" | tr -d "\\\\"" || echo ""', returnStdout: true).trim()
+                            def cpuReq = sh(script: 'grep -A 5 "^    requests:" whanos.yml | grep "cpu:" | head -1 | awk "{print \\\\$2}" | tr -d "\\\\"" || echo ""', returnStdout: true).trim()
                             
                             if (memReq || cpuReq) {
-                                manifest += "            requests:\\n"
-                                if (memReq) manifest += "              memory: \${memReq}\\n"
-                                if (cpuReq) manifest += "              cpu: \${cpuReq}\\n"
+                                manifest += "            requests:\\\\n"
+                                if (memReq) manifest += "              memory: \${memReq}\\\\n"
+                                if (cpuReq) manifest += "              cpu: \${cpuReq}\\\\n"
                             }
                         }
                         
                         def hasLimits = sh(script: 'grep -q "^    limits:" whanos.yml && echo "true" || echo "false"', returnStdout: true).trim()
                         if (hasLimits == 'true') {
-                            def memLim = sh(script: 'grep -A 5 "^    limits:" whanos.yml | grep "memory:" | head -1 | awk "{print \\$2}" | tr -d "\\"" || echo ""', returnStdout: true).trim()
-                            def cpuLim = sh(script: 'grep -A 5 "^    limits:" whanos.yml | grep "cpu:" | head -1 | awk "{print \\$2}" | tr -d "\\"" || echo ""', returnStdout: true).trim()
+                            def memLim = sh(script: 'grep -A 5 "^    limits:" whanos.yml | grep "memory:" | head -1 | awk "{print \\\\$2}" | tr -d "\\\\"" || echo ""', returnStdout: true).trim()
+                            def cpuLim = sh(script: 'grep -A 5 "^    limits:" whanos.yml | grep "cpu:" | head -1 | awk "{print \\\\$2}" | tr -d "\\\\"" || echo ""', returnStdout: true).trim()
                             
                             if (memLim || cpuLim) {
-                                manifest += "            limits:\\n"
-                                if (memLim) manifest += "              memory: \${memLim}\\n"
-                                if (cpuLim) manifest += "              cpu: \${cpuLim}\\n"
+                                manifest += "            limits:\\\\n"
+                                if (memLim) manifest += "              memory: \${memLim}\\\\n"
+                                if (cpuLim) manifest += "              cpu: \${cpuLim}\\\\n"
                             }
                         }
                     }
