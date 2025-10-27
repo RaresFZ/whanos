@@ -81,6 +81,7 @@ pipeline {
         REGISTRY_HOST = '{{ registry_hostname | default("registry.whanos.example.com") }}'
         REGISTRY_USER = '{{ registry_username | default("ci") }}'
         REGISTRY_PASS = '{{ registry_password | default("changeme") }}'
+        KUBECONFIG = '/var/lib/jenkins/.kube/config'
     }
     
     stages {
@@ -164,42 +165,42 @@ pipeline {
                     def ports = sh(script: 'grep -A 10 "^  ports:" whanos.yml | grep -E "^    - " | sed "s/^    - //" | tr "\\\\n" "," || echo ""', returnStdout: true).trim()
                     
                     // Generate basic deployment manifest
-                    def manifest = """
-                        apiVersion: apps/v1
-                        kind: Deployment
-                        metadata:
-                          name: ${jobName}
-                          namespace: whanos-cicd
-                        spec:
-                          replicas: ${replicas}
-                          selector:
-                            matchLabels:
-                              app: ${jobName}
-                          template:
-                            metadata:
-                              labels:
-                                app: ${jobName}
-                            spec:
-                              imagePullSecrets:
-                                - name: registry-credentials
-                              containers:
-                                - name: ${jobName}
-                                  image: ${env.IMAGE_NAME}
-                                  imagePullPolicy: Always
-                    """.stripIndent()
+                    def manifestLines = [
+                        "apiVersion: apps/v1",
+                        "kind: Deployment",
+                        "metadata:",
+                        "  name: ${jobName}",
+                        "  namespace: whanos-cicd",
+                        "spec:",
+                        "  replicas: " + replicas,
+                        "  selector:",
+                        "    matchLabels:",
+                        "      app: ${jobName}",
+                        "  template:",
+                        "    metadata:",
+                        "      labels:",
+                        "        app: ${jobName}",
+                        "    spec:",
+                        "      imagePullSecrets:",
+                        "        - name: registry-credentials",
+                        "      containers:",
+                        "        - name: ${jobName}",
+                        "          image: " + env.IMAGE_NAME,
+                        "          imagePullPolicy: Always"
+                    ]
                     
                     // Add ports if any
                     if (ports) {
-                        manifest += "          ports:\\\\n"
+                        manifestLines << "          ports:"
                         ports.split(',').findAll { it }.each { port ->
-                            manifest += "            - containerPort: " + port.trim() + "\\\\n"
+                            manifestLines << "            - containerPort: " + port.trim()
                         }
                     }
                     
                     // Check for resource requests/limits
                     def hasResources = sh(script: 'grep -q "^  resources:" whanos.yml && echo "true" || echo "false"', returnStdout: true).trim()
                     if (hasResources == 'true') {
-                        manifest += "          resources:\\\\n"
+                        manifestLines << "          resources:"
                         
                         def hasRequests = sh(script: 'grep -q "^    requests:" whanos.yml && echo "true" || echo "false"', returnStdout: true).trim()
                         if (hasRequests == 'true') {
@@ -207,9 +208,9 @@ pipeline {
                             def cpuReq = sh(script: 'grep -A 5 "^    requests:" whanos.yml | grep "cpu:" | head -1 | cut -d: -f2 | tr -d " \\\\"" || echo ""', returnStdout: true).trim()
                             
                             if (memReq || cpuReq) {
-                                manifest += "            requests:\\\\n"
-                                if (memReq) manifest += "              memory: " + memReq + "\\\\n"
-                                if (cpuReq) manifest += "              cpu: " + cpuReq + "\\\\n"
+                                manifestLines << "            requests:"
+                                if (memReq) manifestLines << "              memory: " + memReq
+                                if (cpuReq) manifestLines << "              cpu: " + cpuReq
                             }
                         }
                         
@@ -219,37 +220,44 @@ pipeline {
                             def cpuLim = sh(script: 'grep -A 5 "^    limits:" whanos.yml | grep "cpu:" | head -1 | cut -d: -f2 | tr -d " \\\\"" || echo ""', returnStdout: true).trim()
                             
                             if (memLim || cpuLim) {
-                                manifest += "            limits:\\\\n"
-                                if (memLim) manifest += "              memory: " + memLim + "\\\\n"
-                                if (cpuLim) manifest += "              cpu: " + cpuLim + "\\\\n"
+                                manifestLines << "            limits:"
+                                if (memLim) manifestLines << "              memory: " + memLim
+                                if (cpuLim) manifestLines << "              cpu: " + cpuLim
                             }
                         }
                     }
                     
+                    def manifest = manifestLines.join('\\n') + '\\n'
+                    
                     // Apply deployment
                     writeFile file: 'deployment.yaml', text: manifest
-                    sh 'kubectl apply -f deployment.yaml -n whanos-cicd'
+                    sh 'kubectl apply --validate=false -f deployment.yaml -n whanos-cicd'
                     
                     // Create service if ports exist
                     if (ports) {
-                        def serviceManifest = """
-                            apiVersion: v1
-                            kind: Service
-                            metadata:
-                              name: ${jobName}
-                              namespace: whanos-cicd
-                            spec:
-                              type: NodePort
-                              selector:
-                                app: ${jobName}
-                              ports:
-                        """.stripIndent()
+                        def serviceLines = [
+                            "apiVersion: v1",
+                            "kind: Service",
+                            "metadata:",
+                            "  name: ${jobName}",
+                            "  namespace: whanos-cicd",
+                            "spec:",
+                            "  type: NodePort",
+                            "  selector:",
+                            "    app: ${jobName}",
+                            "  ports:"
+                        ]
                         ports.split(',').findAll { it }.each { port ->
-                            serviceManifest += "    - port: " + port.trim() + "\\\\n      targetPort: " + port.trim() + "\\\\n      protocol: TCP\\\\n"
+                            def p = port.trim()
+                            serviceLines << "    - port: " + p
+                            serviceLines << "      targetPort: " + p
+                            serviceLines << "      protocol: TCP"
                         }
                         
+                        def serviceManifest = serviceLines.join('\\n') + '\\n'
+                        
                         writeFile file: 'service.yaml', text: serviceManifest
-                        sh 'kubectl apply -f service.yaml -n whanos-cicd'
+                        sh 'kubectl apply --validate=false -f service.yaml -n whanos-cicd'
                     }
                 }
             }

@@ -3,3 +3,8 @@
   ansible.builtin.service:
     name: docker
     state: restarted
+
+- name: restart jenkins
+  ansible.builtin.service:
+    name: jenkins
+    state: restarted

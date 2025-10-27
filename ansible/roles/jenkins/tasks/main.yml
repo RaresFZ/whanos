@@ -477,3 +477,30 @@
     - befunge
   register: base_image_build
   changed_when: "'Successfully built' in base_image_build.stdout or 'Successfully tagged' in base_image_build.stdout"
+
+- name: Ensure .kube directory exists for jenkins user
+  ansible.builtin.file:
+    path: /var/lib/jenkins/.kube
+    state: directory
+    owner: jenkins
+    group: jenkins
+    mode: "0755"
+
+- name: Copy Kubernetes admin config for jenkins user
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: /var/lib/jenkins/.kube/config
+    remote_src: true
+    owner: jenkins
+    group: jenkins
+    mode: "0600"
+  when: groups['k8s_control_plane'] is defined
+
+- name: Set KUBECONFIG environment variable for Jenkins
+  ansible.builtin.lineinfile:
+    path: "{{ jenkins_env_file }}"
+    regexp: '^KUBECONFIG='
+    line: 'KUBECONFIG="/var/lib/jenkins/.kube/config"'
+    create: false
+  notify: restart jenkins
+  when: groups['k8s_control_plane'] is defined
