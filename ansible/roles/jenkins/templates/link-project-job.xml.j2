@@ -159,14 +159,11 @@ pipeline {
             }
             steps {
                 script {
-                    // Parse whanos.yml
-                    def whanosConfig = readYaml file: 'whanos.yml'
-                    def deployment = whanosConfig.deployment ?: [:]
-                    def replicas = deployment.replicas ?: 1
-                    def resources = deployment.resources ?: [:]
-                    def ports = deployment.ports ?: []
+                    // Parse whanos.yml using shell commands
+                    def replicas = sh(script: "grep -E '^  replicas:' whanos.yml | awk '{print \\\$2}' || echo '1'", returnStdout: true).trim()
+                    def ports = sh(script: "grep -A 10 '^  ports:' whanos.yml | grep -E '^    - ' | sed 's/^    - //' | tr '\\n' ',' || echo ''", returnStdout: true).trim()
                     
-                    // Generate Kubernetes manifest
+                    // Generate basic deployment manifest
                     def manifest = \"\"\"
 apiVersion: apps/v1
 kind: Deployment
@@ -191,36 +188,49 @@ spec:
           imagePullPolicy: Always
 \"\"\"
                     
-                    // Add ports if specified
+                    // Add ports if any
                     if (ports) {
                         manifest += "          ports:\\n"
-                        ports.each { port ->
-                            manifest += "            - containerPort: \${port}\\n"
+                        ports.split(',').findAll { it }.each { port ->
+                            manifest += "            - containerPort: \${port.trim()}\\n"
                         }
                     }
                     
-                    // Add resources if specified
-                    if (resources) {
+                    // Check for resource requests/limits
+                    def hasResources = sh(script: "grep -q '^  resources:' whanos.yml && echo 'true' || echo 'false'", returnStdout: true).trim()
+                    if (hasResources == 'true') {
                         manifest += "          resources:\\n"
-                        if (resources.requests) {
-                            manifest += "            requests:\\n"
-                            resources.requests.each { key, value ->
-                                manifest += "              \${key}: \${value}\\n"
+                        
+                        def hasRequests = sh(script: "grep -q '^    requests:' whanos.yml && echo 'true' || echo 'false'", returnStdout: true).trim()
+                        if (hasRequests == 'true') {
+                            def memReq = sh(script: "grep -A 5 '^    requests:' whanos.yml | grep 'memory:' | head -1 | awk '{print \\\$2}' | tr -d '\"' || echo ''", returnStdout: true).trim()
+                            def cpuReq = sh(script: "grep -A 5 '^    requests:' whanos.yml | grep 'cpu:' | head -1 | awk '{print \\\$2}' | tr -d '\"' || echo ''", returnStdout: true).trim()
+                            
+                            if (memReq || cpuReq) {
+                                manifest += "            requests:\\n"
+                                if (memReq) manifest += "              memory: \${memReq}\\n"
+                                if (cpuReq) manifest += "              cpu: \${cpuReq}\\n"
                             }
                         }
-                        if (resources.limits) {
-                            manifest += "            limits:\\n"
-                            resources.limits.each { key, value ->
-                                manifest += "              \${key}: \${value}\\n"
+                        
+                        def hasLimits = sh(script: "grep -q '^    limits:' whanos.yml && echo 'true' || echo 'false'", returnStdout: true).trim()
+                        if (hasLimits == 'true') {
+                            def memLim = sh(script: "grep -A 5 '^    limits:' whanos.yml | grep 'memory:' | head -1 | awk '{print \\\$2}' | tr -d '\"' || echo ''", returnStdout: true).trim()
+                            def cpuLim = sh(script: "grep -A 5 '^    limits:' whanos.yml | grep 'cpu:' | head -1 | awk '{print \\\$2}' | tr -d '\"' || echo ''", returnStdout: true).trim()
+                            
+                            if (memLim || cpuLim) {
+                                manifest += "            limits:\\n"
+                                if (memLim) manifest += "              memory: \${memLim}\\n"
+                                if (cpuLim) manifest += "              cpu: \${cpuLim}\\n"
                             }
                         }
                     }
                     
-                    // Apply the manifest
+                    // Apply deployment
                     writeFile file: 'deployment.yaml', text: manifest
                     sh 'kubectl apply -f deployment.yaml -n whanos-cicd'
                     
-                    // Create service if ports are specified
+                    // Create service if ports exist
                     if (ports) {
                         def serviceManifest = \"\"\"
 apiVersion: v1
@@ -234,10 +244,10 @@ spec:
     app: ${jobName}
   ports:
 \"\"\"
-                        ports.each { port ->
+                        ports.split(',').findAll { it }.each { port ->
                             serviceManifest += \"\"\"
-    - port: \${port}
-      targetPort: \${port}
+    - port: \${port.trim()}
+      targetPort: \${port.trim()}
       protocol: TCP
 \"\"\"
                         }
