@@ -1,0 +1,107 @@
+---
+# tasks file for k3d
+
+- name: Check if k3d is installed
+  command: k3d version
+  register: k3d_check
+  changed_when: false
+  failed_when: false
+
+- name: Install k3d
+  when: k3d_check.rc != 0
+  block:
+    - name: Download k3d installation script
+      get_url:
+        url: "{{ k3d_install_script_url }}"
+        dest: /tmp/k3d-install.sh
+        mode: '0755'
+
+    - name: Run k3d installation script
+      command: /tmp/k3d-install.sh
+      args:
+        creates: /usr/local/bin/k3d
+
+    - name: Remove installation script
+      file:
+        path: /tmp/k3d-install.sh
+        state: absent
+
+- name: Check if k3d cluster exists
+  command: k3d cluster list
+  register: k3d_cluster_list
+  changed_when: false
+
+- name: Create k3d cluster with registry
+  command: >
+    k3d cluster create {{ k3d_cluster_name }}
+    --servers {{ k3d_servers }}
+    --agents {{ k3d_agents }}
+    --port "{{ k3d_nodeport_range }}:{{ k3d_nodeport_range }}@server:0"
+    --port "{{ k3d_http_port }}@loadbalancer"
+    --port "{{ k3d_https_port }}@loadbalancer"
+    --registry-create {{ k3d_registry_name }}:{{ k3d_registry_port }}
+  when: k3d_cluster_name not in k3d_cluster_list.stdout
+  register: k3d_create
+
+- name: Wait for cluster nodes to be ready
+  command: kubectl wait --for=condition=Ready nodes --all --timeout=120s
+  retries: 3
+  delay: 10
+  register: nodes_ready
+  until: nodes_ready.rc == 0
+
+- name: Create whanos-cicd namespace
+  command: kubectl create namespace whanos-cicd
+  register: namespace_create
+  changed_when: namespace_create.rc == 0
+  failed_when: namespace_create.rc != 0 and 'AlreadyExists' not in namespace_create.stderr
+
+- name: Create registry credentials secret
+  shell: |
+    kubectl create secret docker-registry registry-credentials \
+      --docker-server={{ k3d_registry_name }}:{{ k3d_registry_port }} \
+      --docker-username={{ registry_username | default('ci') }} \
+      --docker-password={{ registry_password | default('changeme') }} \
+      -n whanos-cicd \
+      --dry-run=client -o yaml | kubectl apply -f -
+  register: secret_create
+  changed_when: "'created' in secret_create.stdout or 'configured' in secret_create.stdout"
+
+- name: Ensure kubeconfig directory exists for Jenkins
+  file:
+    path: /var/lib/jenkins/.kube
+    state: directory
+    owner: jenkins
+    group: jenkins
+    mode: '0755'
+  become: true
+
+- name: Get k3d kubeconfig for Jenkins user
+  shell: k3d kubeconfig get whanos
+  register: k3d_kubeconfig
+  become: false
+
+- name: Write k3d kubeconfig to Jenkins user directory
+  copy:
+    content: "{{ k3d_kubeconfig.stdout }}"
+    dest: /var/lib/jenkins/.kube/config
+    owner: jenkins
+    group: jenkins
+    mode: '0600'
+  become: true
+
+- name: Ensure Jenkins is restarted to pick up new kubeconfig
+  systemd:
+    name: jenkins
+    state: restarted
+  become: true
+
+- name: Wait for Jenkins to be ready after restart
+  uri:
+    url: "http://localhost:8080/login"
+    status_code: 200
+    timeout: 5
+  register: jenkins_check
+  retries: 30
+  delay: 2
+  until: jenkins_check.status == 200

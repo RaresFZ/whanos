@@ -1,0 +1,6 @@
+---
+# handlers file for k3d
+
+- name: restart k3d cluster
+  command: k3d cluster stop {{ k3d_cluster_name }} && k3d cluster start {{ k3d_cluster_name }}
+  listen: "restart k3d"

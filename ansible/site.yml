@@ -7,6 +7,19 @@
   roles:
     - role: registry
 
+# Use k3d for multi-node virtual cluster (recommended)
+- hosts: localhost
+  connection: local
+  tasks:
+    - name: Setup k3d cluster
+      include_role:
+        name: k3d
+      when: use_k3d | default(true) | bool
+
+# Use kubeadm for traditional Kubernetes (requires physical/VM infrastructure)
 - hosts: k8s_control_plane:k8s_workers
-  roles:
-    - role: kubernetes
+  tasks:
+    - name: Setup Kubernetes with kubeadm
+      include_role:
+        name: kubernetes
+      when: not (use_k3d | default(true) | bool)

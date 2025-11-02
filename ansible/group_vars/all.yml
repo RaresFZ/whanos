@@ -8,3 +8,8 @@ whanos_default_timezone: UTC
 registry_hostname: registry.whanos.example.com
 registry_username: ci
 registry_password: changeme
+
+# Kubernetes provisioning method
+# Set to true for k3d (multi-node virtual cluster - recommended)
+# Set to false for kubeadm (requires physical infrastructure)
+use_k3d: true

@@ -71,6 +71,13 @@ done
 
 require_cmd ansible
 
+# Check if k3d cluster exists (auto-detect)
+K3D_EXISTS=0
+if command -v k3d >/dev/null 2>&1 && k3d cluster list 2>/dev/null | grep -q "^whanos"; then
+  K3D_EXISTS=1
+  echo "==> Detected k3d cluster 'whanos'"
+fi
+
 if [[ $SKIP_JENKINS -eq 0 ]]; then
   run_cmd "Stopping Jenkins service" ansible \
     -i "$INVENTORY" \
@@ -98,7 +105,11 @@ if [[ $SKIP_REGISTRY -eq 0 ]]; then
   fi
 fi
 
-if [[ $SKIP_K8S -eq 0 ]]; then
+# Handle k3d cluster deletion
+if [[ $K3D_EXISTS -eq 1 ]] && [[ $SKIP_K8S -eq 0 || $RESET_K8S -eq 1 ]]; then
+  run_cmd "Deleting k3d cluster 'whanos'" k3d cluster delete whanos
+  echo "k3d cluster deleted."
+elif [[ $SKIP_K8S -eq 0 ]]; then
   run_cmd "Stopping kubelet service" ansible \
     -i "$INVENTORY" \
     k8s_control_plane:k8s_workers \

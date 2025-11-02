@@ -53,12 +53,15 @@ if (!repoUrl || !repoName) {
     throw new IllegalArgumentException('REPOSITORY_URL and REPOSITORY_NAME are required')
 }
 
-// Sanitize job name
-def jobName = repoName.replaceAll(/[^A-Za-z0-9_-]/, '-')
+// Sanitize job name - replace underscores and invalid chars with dashes for Kubernetes compatibility
+def jobName = repoName.replaceAll(/[^A-Za-z0-9-]/, '-').toLowerCase()
 
 folder('Projects') {
     description('Whanos project builds')
 }
+
+// Build credentials part conditionally
+def credentialsPart = credentialsId ? ", credentialsId: '\${credentialsId}'" : ''
 
 pipelineJob("Projects/${jobName}") {
     description("Whanos CI/CD for ${repoUrl}")
@@ -78,7 +81,8 @@ pipeline {
     agent any
     
     environment {
-        REGISTRY_HOST = '{{ registry_hostname | default("registry.whanos.example.com") }}'
+        REGISTRY_HOST = 'localhost:5000'
+        K8S_REGISTRY_HOST = 'whanos-registry:5000'
         REGISTRY_USER = '{{ registry_username | default("ci") }}'
         REGISTRY_PASS = '{{ registry_password | default("changeme") }}'
         KUBECONFIG = '/var/lib/jenkins/.kube/config'
@@ -91,8 +95,7 @@ pipeline {
                     \$class: 'GitSCM',
                     branches: [[name: '${branch}']],
                     userRemoteConfigs: [[
-                        url: '${repoUrl}'
-                        ${credentialsId ? ", credentialsId: '${credentialsId}'" : ''}
+                        url: '${repoUrl}'${credentialsPart}
                     ]]
                 ])
             }
@@ -122,7 +125,10 @@ pipeline {
         stage('Build Image') {
             steps {
                 script {
-                    def imageName = "\${env.REGISTRY_HOST}/${jobName}:\${env.BUILD_NUMBER}"
+                    // Use localhost:5000 for pushing from Jenkins host
+                    def imageName = "localhost:5000/${jobName}:\${env.BUILD_NUMBER}"
+                    // Use whanos-registry:5000 for pulling from k8s pods
+                    def k8sImageName = "whanos-registry:5000/${jobName}:\${env.BUILD_NUMBER}"
                     
                     if (fileExists('Dockerfile')) {
                         // Custom Dockerfile exists - user wants to customize the base image
@@ -138,6 +144,7 @@ pipeline {
                     }
                     
                     env.IMAGE_NAME = imageName
+                    env.K8S_IMAGE_NAME = k8sImageName
                 }
             }
         }
@@ -146,9 +153,9 @@ pipeline {
             steps {
                 script {
                     sh \"\"\"
-                        echo "\${env.REGISTRY_PASS}" | docker login -u "\${env.REGISTRY_USER}" --password-stdin "\${env.REGISTRY_HOST}"
+                        echo "\${env.REGISTRY_PASS}" | docker login -u "\${env.REGISTRY_USER}" --password-stdin localhost:5000
                         docker push "\${env.IMAGE_NAME}"
-                        docker logout "\${env.REGISTRY_HOST}"
+                        docker logout localhost:5000
                     \"\"\"
                 }
             }
@@ -160,6 +167,9 @@ pipeline {
             }
             steps {
                 script {
+                    // Ensure we're using the k3d cluster context
+                    sh 'kubectl config use-context k3d-whanos || true'
+                    
                     // Parse whanos.yml using shell commands
                     def replicas = sh(script: 'grep -E "^  replicas:" whanos.yml | cut -d: -f2 | tr -d " " || echo "1"', returnStdout: true).trim()
                     def ports = sh(script: 'grep -A 10 "^  ports:" whanos.yml | grep -E "^    - " | sed "s/^    - //" | tr "\\\\n" "," || echo ""', returnStdout: true).trim()
@@ -185,7 +195,7 @@ pipeline {
                         "        - name: registry-credentials",
                         "      containers:",
                         "        - name: ${jobName}",
-                        "          image: " + env.IMAGE_NAME,
+                        "          image: " + env.K8S_IMAGE_NAME,
                         "          imagePullPolicy: Always"
                     ]
                     
@@ -242,7 +252,7 @@ pipeline {
                             "  name: ${jobName}",
                             "  namespace: whanos-cicd",
                             "spec:",
-                            "  type: NodePort",
+                            "  type: ClusterIP",
                             "  selector:",
                             "    app: ${jobName}",
                             "  ports:"
@@ -252,12 +262,62 @@ pipeline {
                             serviceLines << "    - port: " + p
                             serviceLines << "      targetPort: " + p
                             serviceLines << "      protocol: TCP"
+                            serviceLines << "      name: port-" + p
                         }
                         
                         def serviceManifest = serviceLines.join('\\n') + '\\n'
                         
                         writeFile file: 'service.yaml', text: serviceManifest
                         sh 'kubectl apply --validate=false -f service.yaml -n whanos-cicd'
+                        
+                        // Create Traefik Middleware for path prefix stripping
+                        def middlewareLines = [
+                            "apiVersion: traefik.containo.us/v1alpha1",
+                            "kind: Middleware",
+                            "metadata:",
+                            "  name: ${jobName}-stripprefix",
+                            "  namespace: whanos-cicd",
+                            "spec:",
+                            "  stripPrefix:",
+                            "    prefixes:",
+                            "      - /${jobName}",
+                        ]
+                        def middlewareManifest = middlewareLines.join('\\n') + '\\n'
+                        
+                        writeFile file: 'middleware.yaml', text: middlewareManifest
+                        sh 'kubectl apply --validate=false -f middleware.yaml -n whanos-cicd'
+                        
+                        // Create Ingress for external access
+                        def firstPort = ports.split(',').findAll { it }[0].trim()
+                        def ingressLines = [
+                            "apiVersion: networking.k8s.io/v1",
+                            "kind: Ingress",
+                            "metadata:",
+                            "  name: ${jobName}",
+                            "  namespace: whanos-cicd",
+                            "  annotations:",
+                            "    traefik.ingress.kubernetes.io/router.entrypoints: web",
+                            "    traefik.ingress.kubernetes.io/router.middlewares: whanos-cicd-${jobName}-stripprefix@kubernetescrd",
+                            "spec:",
+                            "  rules:",
+                            "    - http:",
+                            "        paths:",
+                            "          - path: /${jobName}",
+                            "            pathType: Prefix",
+                            "            backend:",
+                            "              service:",
+                            "                name: ${jobName}",
+                            "                port:",
+                            "                  number: " + firstPort
+                        ]
+                        
+                        def ingressManifest = ingressLines.join('\\n') + '\\n'
+                        
+                        writeFile file: 'ingress.yaml', text: ingressManifest
+                        sh 'kubectl delete ingress ${jobName} -n whanos-cicd --ignore-not-found=true'
+                        sh 'kubectl apply --validate=false -f ingress.yaml -n whanos-cicd'
+                        
+                        echo "Application accessible at: http://localhost:8081/${jobName} or http://<your-ip>:8081/${jobName}"
                     }
                 }
             }

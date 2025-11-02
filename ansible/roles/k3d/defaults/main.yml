@@ -1,0 +1,13 @@
+---
+# defaults file for k3d
+
+k3d_cluster_name: whanos
+k3d_servers: 1
+k3d_agents: 2
+k3d_registry_name: whanos-registry
+k3d_registry_port: 5000
+k3d_nodeport_range: "30000-30100"
+k3d_http_port: "8081:80"
+k3d_https_port: "8443:443"
+k3d_version: "v5.8.3"
+k3d_install_script_url: "https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh"
