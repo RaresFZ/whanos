@@ -26,6 +26,12 @@ EOF
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INVENTORY="${ROOT}/ansible/inventory/hosts.yml"
 
+# Ensure Ansible has a valid UTF-8 locale even if the shell lacks one
+DEFAULT_LOCALE="en_US.UTF-8"
+export LANG="${LANG:-$DEFAULT_LOCALE}"
+export LC_ALL="${LC_ALL:-$DEFAULT_LOCALE}"
+export LC_CTYPE="${LC_CTYPE:-$DEFAULT_LOCALE}"
+
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "Error: required command '$1' not found." >&2

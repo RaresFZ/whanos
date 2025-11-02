@@ -2,6 +2,7 @@
 jenkins_version: "2.452.1-lts-jdk17"
 jenkins_http_port: 8080
 jenkins_admin_user: admin
+jenkins_admin_display_name: "Admin"
 jenkins_admin_password: changeme
 jenkins_plugins:
   - configuration-as-code
@@ -15,11 +16,8 @@ jenkins_plugins:
   - timestamper
   - parameterized-trigger
   - cloudbees-folder
-jenkins_seed_jobs:
-  - name: whanos-orchestrator
-    script_path: Jenkinsfile
-    git_url: "https://github.com/RaresFZ/whanos.git"
-    git_branch: "main"
+  - people-view
+jenkins_seed_jobs: []
 jenkins_registry_username: ci
 jenkins_registry_password: changeme
 jenkins_cli_jar: /var/lib/jenkins/jenkins-cli.jar

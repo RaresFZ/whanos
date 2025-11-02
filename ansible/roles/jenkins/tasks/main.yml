@@ -64,6 +64,10 @@
   loop:
     - regex: '^JENKINS_JAVA_OPTIONS='
       line: 'JENKINS_JAVA_OPTIONS="-Djava.awt.headless=true -Djenkins.install.runSetupWizard=false"'
+    - regex: '^JENKINS_ARGS='
+      line: 'JENKINS_ARGS="--httpPort={{ jenkins_http_port }}"'
+    - regex: '^JENKINS_PORT='
+      line: 'JENKINS_PORT=--httpPort={{ jenkins_http_port }}'
   when: ansible_facts.os_family == 'Archlinux'
 
 - name: Configure Jenkins environment to skip setup wizard (Debian)
@@ -167,6 +171,17 @@
   retries: 3
   delay: 5
   until: casc_plugin_install.rc == 0
+
+- name: Install matrix-auth plugin (without auth)
+  ansible.builtin.shell: >
+    java -jar {{ jenkins_cli_jar }}
+    -s http://localhost:{{ jenkins_http_port }}/
+    -http
+    install-plugin matrix-auth
+  register: matrix_plugin_install
+  retries: 3
+  delay: 5
+  until: matrix_plugin_install.rc == 0
 
 - name: Remove security disabling script
   ansible.builtin.file:
@@ -310,6 +325,84 @@
 - name: Wait for all plugins to fully load
   ansible.builtin.pause:
     seconds: 15
+
+- name: Apply Jenkins security configuration via Groovy script
+  ansible.builtin.shell: |
+    set -euo pipefail
+    java -jar {{ jenkins_cli_jar }} \
+      -s http://localhost:{{ jenkins_http_port }}/ \
+      -auth @/var/lib/jenkins/whanos-admin.txt \
+      -http groovy = <<'EOF'
+    import jenkins.model.*
+    import hudson.security.*
+
+    def instance = Jenkins.getInstance()
+
+    // Set up local security realm with admin user
+    def hudsonRealm = new HudsonPrivateSecurityRealm(false)
+    hudsonRealm.createAccount("{{ jenkins_admin_user }}", "{{ jenkins_admin_password }}")
+    instance.setSecurityRealm(hudsonRealm)
+
+    // Set up matrix authorization strategy
+    def strategy = new hudson.security.GlobalMatrixAuthorizationStrategy()
+    strategy.add(Jenkins.ADMINISTER, "{{ jenkins_admin_user }}")
+    instance.setAuthorizationStrategy(strategy)
+
+    // Save configuration
+    instance.save()
+    println "Security configuration applied successfully"
+    EOF
+  args:
+    executable: /bin/bash
+  register: security_apply
+  retries: 3
+  delay: 5
+  until: security_apply.rc == 0
+
+- name: Apply Jenkins Configuration as Code for additional settings
+  ansible.builtin.shell: |
+    set -euo pipefail
+    java -jar {{ jenkins_cli_jar }} \
+      -s http://localhost:{{ jenkins_http_port }}/ \
+      -auth {{ jenkins_admin_user }}:{{ jenkins_admin_password }} \
+      -http groovy = <<'EOF'
+    import io.jenkins.plugins.casc.ConfigurationAsCode
+    
+    // Apply JCasC configuration (this will preserve security settings)
+    ConfigurationAsCode.get().configure()
+    EOF
+  args:
+    executable: /bin/bash
+  register: jcasc_apply
+  retries: 3
+  delay: 5
+  until: jcasc_apply.rc == 0
+
+- name: Restart Jenkins to ensure all settings are active
+  ansible.builtin.systemd:
+    name: jenkins
+    state: restarted
+
+- name: Wait for Jenkins to be ready after restart
+  ansible.builtin.uri:
+    url: http://localhost:{{ jenkins_http_port }}/login
+    status_code: 200
+    timeout: 5
+  register: jenkins_login_status
+  retries: 30
+  delay: 10
+  until: jenkins_login_status.status == 200
+
+- name: Verify Jenkins admin account is active
+  ansible.builtin.shell: |
+    set -euo pipefail
+    java -jar {{ jenkins_cli_jar }} \
+      -s http://localhost:{{ jenkins_http_port }}/ \
+      -auth {{ jenkins_admin_user }}:{{ jenkins_admin_password }} \
+      -http who-am-i
+  register: jenkins_admin_identity
+  changed_when: false
+  failed_when: jenkins_admin_user not in jenkins_admin_identity.stdout
 
 - name: Prepare pipeline job configuration
   ansible.builtin.template:
@@ -486,6 +579,11 @@
     group: jenkins
     mode: "0755"
 
+- name: Check for Kubernetes admin config
+  ansible.builtin.stat:
+    path: /etc/kubernetes/admin.conf
+  register: kube_admin_conf
+
 - name: Copy Kubernetes admin config for jenkins user
   ansible.builtin.copy:
     src: /etc/kubernetes/admin.conf
@@ -494,7 +592,9 @@
     owner: jenkins
     group: jenkins
     mode: "0600"
-  when: groups['k8s_control_plane'] is defined
+  when:
+    - groups['k8s_control_plane'] is defined
+    - kube_admin_conf.stat.exists
 
 - name: Set KUBECONFIG environment variable for Jenkins
   ansible.builtin.lineinfile:
@@ -503,4 +603,6 @@
     line: 'KUBECONFIG="/var/lib/jenkins/.kube/config"'
     create: false
   notify: restart jenkins
-  when: groups['k8s_control_plane'] is defined
+  when:
+    - groups['k8s_control_plane'] is defined
+    - kube_admin_conf.stat.exists

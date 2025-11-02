@@ -30,6 +30,14 @@
     groups: docker
     append: true
 
+- name: Ensure Docker config directory exists (Arch)
+  ansible.builtin.file:
+    path: /etc/docker
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Configure Docker daemon to allow insecure registry (Arch)
   ansible.builtin.copy:
     dest: /etc/docker/daemon.json

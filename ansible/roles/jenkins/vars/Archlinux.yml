@@ -6,4 +6,4 @@ jenkins_env_entries:
   - regex: '^JENKINS_ARGS='
     line: 'JENKINS_ARGS="--httpPort={{ jenkins_http_port }}"'
   - regex: '^JENKINS_PORT='
-    line: 'JENKINS_PORT={{ jenkins_http_port }}'
+    line: 'JENKINS_PORT=--httpPort={{ jenkins_http_port }}'

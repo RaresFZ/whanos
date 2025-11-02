@@ -1,19 +1,18 @@
 jenkins:
   systemMessage: "Provisioned by Ansible for Whanos."
-  location:
-    url: "http://{{ whanos_jenkins_host }}:{{ jenkins_http_port }}/"
   securityRealm:
     local:
       allowsSignup: false
       users:
         - id: "{{ jenkins_admin_user }}"
-          name: "{{ jenkins_admin_user }}"
+          name: "{{ jenkins_admin_display_name | default(jenkins_admin_user) }}"
           password: "{{ jenkins_admin_password }}"
   authorizationStrategy:
     globalMatrix:
-      permissions:
-        - "GROUP:Anonymous:Overall/Read"
-        - "USER:{{ jenkins_admin_user }}:Overall/Administer"
+      entries:
+        - user: "{{ jenkins_admin_user }}"
+          permissions:
+            - "Overall/Administer"
   disableRememberMe: false
 
 credentials:
