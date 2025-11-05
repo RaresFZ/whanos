@@ -27,10 +27,21 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INVENTORY="${ROOT}/ansible/inventory/hosts.yml"
 
 # Ensure Ansible has a valid UTF-8 locale even if the shell lacks one
-DEFAULT_LOCALE="en_US.UTF-8"
-export LANG="${LANG:-$DEFAULT_LOCALE}"
-export LC_ALL="${LC_ALL:-$DEFAULT_LOCALE}"
-export LC_CTYPE="${LC_CTYPE:-$DEFAULT_LOCALE}"
+# Try to find an available UTF-8 locale, fallback to C.UTF-8 which is widely available
+if [[ -z "${LC_ALL:-}" ]]; then
+  for locale_candidate in "C.UTF-8" "C.utf8" "en_US.UTF-8" "en_US.utf8"; do
+    if locale -a 2>/dev/null | grep -qi "^${locale_candidate}$"; then
+      export LC_ALL="$locale_candidate"
+      export LANG="$locale_candidate"
+      break
+    fi
+  done
+  # If no UTF-8 locale found, use C (POSIX) which always exists
+  if [[ -z "${LC_ALL:-}" ]]; then
+    export LC_ALL=C
+    export LANG=C
+  fi
+fi
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then

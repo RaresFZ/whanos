@@ -106,7 +106,7 @@ pipeline {
                 script {
                     if (fileExists('Makefile')) {
                         env.LANGUAGE = 'c'
-                    } else if (fileExists('app/pom.xml')) {
+                    } else if (fileExists('pom.xml')) {
                         env.LANGUAGE = 'java'
                     } else if (fileExists('package.json')) {
                         env.LANGUAGE = 'javascript'

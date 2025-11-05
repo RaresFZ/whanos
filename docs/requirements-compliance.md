@@ -7,7 +7,7 @@
 - ✅ Java (Java SE 21, Maven with pom.xml)
 - ✅ JavaScript (Node.js 20.9, package.json)
 - ✅ Python (3.12, requirements.txt)
-- ✅ Befunge (Befunge-93 via pyfunge, main.bf)
+- ✅ Befunge (Befunge-93 reference implementation, main.bf)
 
 ### Whanos Images
 - ✅ Base images for all 5 languages

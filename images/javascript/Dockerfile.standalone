@@ -1,7 +1,12 @@
 # syntax=docker/dockerfile:1.6
-FROM whanos-javascript:latest
+FROM node:20.9-alpine
 
-WORKDIR /workspace
+SHELL ["/bin/bash", "-c"]
+
+LABEL maintainer="whanos" \
+      org.whanos.language="javascript"
+
+WORKDIR /app
 
 COPY package*.json ./
 

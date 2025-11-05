@@ -1,10 +1,20 @@
 # syntax=docker/dockerfile:1.6
-FROM whanos-java:latest
+FROM maven:3.9.6-eclipse-temurin-21 AS build
 
-WORKDIR /workspace
+SHELL ["/bin/bash", "-c"]
+
+WORKDIR /app
 
 COPY . .
 
-RUN mvn -f app/pom.xml -DskipTests package
+RUN mvn -DskipTests package
 
-CMD ["java", "-jar", "app/target/app.jar"]
+FROM eclipse-temurin:21-jre
+
+SHELL ["/bin/bash", "-c"]
+
+WORKDIR /app
+
+COPY --from=build /app/target/app.jar /app/target/app.jar
+
+CMD ["java", "-jar", "target/app.jar"]

@@ -70,7 +70,7 @@ Developer Push → Jenkins (link-project) → Auto-detect Language → Build Ima
 | Language   | Base tag        | Build expectation                                                                | Default runtime command                     |
 |------------|-----------------|----------------------------------------------------------------------------------|---------------------------------------------|
 | C          | `whanos-c`      | Run `make` to compile into `compiled-app` at the repo root.                      | `./compiled-app`                            |
-| Java       | `whanos-java`   | Execute `mvn -f app/pom.xml -DskipTests package` to produce `app/target/app.jar`.| `java -jar app/target/app.jar`              |
+| Java       | `whanos-java`   | Execute `mvn -DskipTests package` to produce `target/app.jar`.| `java -jar target/app.jar`              |
 | JavaScript | `whanos-javascript` | Install dependencies with `npm ci --omit=dev` or `npm install --production`. | `node .`                                    |
 | Python     | `whanos-python` | Install dependencies from `requirements.txt`.                                    | `python -m app`                             |
 | Befunge    | `whanos-befunge`| Ensure `app/main.bf` exists.                                                     | `befunge93 app/main.bf`                     |
@@ -81,7 +81,7 @@ Each `Dockerfile.standalone` extends its paired base image and demonstrates how 
 
 `orchestrator/main.py` is the single entry point used by the CI/CD system to containerize an application repository.
 
-- **Detection rules:** `Makefile` ⇒ C, `app/pom.xml` ⇒ Java, `package.json` ⇒ JavaScript, `requirements.txt` ⇒ Python, `app/main.bf` ⇒ Befunge. Detection failures or collisions abort the build with a descriptive error.
+- **Detection rules:** `Makefile` ⇒ C, `pom.xml` ⇒ Java, `package.json` ⇒ JavaScript, `requirements.txt` ⇒ Python, `app/main.bf` ⇒ Befunge. Detection failures or collisions abort the build with a descriptive error.
 - **Customizations:** Repositories can provide `whanos/Dockerfile.override` (full control) or `whanos/Dockerfile.append` (appended instructions) to extend the generated Dockerfile while still inheriting from the Whanos base image.
 - **Tests:** Before the container build, the orchestrator executes language-appropriate test commands inside the base image (`mvn test`, `npm test` when declared, `pytest` when a `tests/` tree exists). `--skip-tests` disables this phase when needed.
 - **Registry integration:** The target image reference is injected via `--image`. Registry host and credentials travel through environment variables (`WHANOS_REGISTRY_USERNAME` / `WHANOS_REGISTRY_PASSWORD`) and the optional `--registry` flag triggers a `docker login`.

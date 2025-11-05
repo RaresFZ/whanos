@@ -1,10 +1,12 @@
 # syntax=docker/dockerfile:1.6
 FROM node:20.9-alpine
 
+SHELL ["/bin/bash", "-c"]
+
 LABEL maintainer="whanos" \
       org.whanos.language="javascript"
 
-WORKDIR /workspace
+WORKDIR /app
 
 # Default command executes the repository's package main via `node .`.
-CMD ["node", "."]
+CMD ["/bin/bash"]

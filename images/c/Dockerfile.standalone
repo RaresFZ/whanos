@@ -1,10 +1,25 @@
 # syntax=docker/dockerfile:1.6
-FROM whanos-c:latest
+FROM gcc:13.2 AS build
 
-WORKDIR /workspace
+SHELL ["/bin/bash", "-c"]
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       make \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
 
 COPY . .
 
 RUN make
+
+FROM debian:12-slim
+
+SHELL ["/bin/bash", "-c"]
+
+WORKDIR /app
+
+COPY --from=build /app/compiled-app /app/compiled-app
 
 CMD ["./compiled-app"]

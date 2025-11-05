@@ -1,13 +1,15 @@
 # syntax=docker/dockerfile:1.6
 FROM python:3.12-slim
 
+SHELL ["/bin/bash", "-c"]
+
 LABEL maintainer="whanos" \
       org.whanos.language="python"
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
-WORKDIR /workspace
+WORKDIR /app
 
 # Requirements are installed by derived images; base image only provides the runtime.
-CMD ["python", "-m", "app"]
+CMD ["/bin/bash"]

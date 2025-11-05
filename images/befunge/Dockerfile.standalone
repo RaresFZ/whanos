@@ -1,7 +1,27 @@
 # syntax=docker/dockerfile:1.6
-FROM whanos-befunge:latest
+FROM debian:12-slim
 
-WORKDIR /workspace
+SHELL ["/bin/bash", "-c"]
+
+LABEL maintainer="whanos" \
+      org.whanos.language="befunge"
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       gcc \
+       libc6-dev \
+       make \
+       git \
+       ca-certificates \
+    && git clone https://github.com/catseye/Befunge-93.git /tmp/befunge \
+    && cd /tmp/befunge && make \
+    && mv bin/bef /usr/local/bin/befunge93 \
+    && cd / && rm -rf /tmp/befunge \
+    && apt-get remove -y gcc libc6-dev make git \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
 
 COPY . .
 
