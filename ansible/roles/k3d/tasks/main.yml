@@ -50,6 +50,32 @@
   register: nodes_ready
   until: nodes_ready.rc == 0
 
+- name: Wait for Traefik deployment to be ready
+  command: kubectl wait --for=condition=Available deployment/traefik -n kube-system --timeout=120s
+  retries: 5
+  delay: 10
+  register: traefik_ready
+  until: traefik_ready.rc == 0
+  failed_when: false
+
+- name: Check if Traefik CRDs are installed
+  shell: kubectl get crd middlewares.traefik.containo.us 2>/dev/null
+  register: traefik_crd_check
+  changed_when: false
+  failed_when: false
+
+- name: Wait for Traefik CRDs to be available
+  command: kubectl wait --for condition=established --timeout=60s crd/middlewares.traefik.containo.us
+  retries: 5
+  delay: 5
+  register: crd_wait
+  until: crd_wait.rc == 0
+  when: traefik_crd_check.rc == 0
+
+- name: Display Traefik CRD status
+  debug:
+    msg: "Traefik CRDs are {{ 'installed and ready' if traefik_crd_check.rc == 0 else 'NOT installed - k3s might be running without Traefik' }}"
+
 - name: Create whanos-cicd namespace
   command: kubectl create namespace whanos-cicd
   register: namespace_create

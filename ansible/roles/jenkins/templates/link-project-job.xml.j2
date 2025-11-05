@@ -134,12 +134,9 @@ pipeline {
                         // Custom Dockerfile exists - user wants to customize the base image
                         sh "docker build -t \${imageName} ."
                     } else {
-                        // No custom Dockerfile - use standalone Whanos image
-                        // Clone Whanos repo to get the standalone Dockerfile
+                        // No custom Dockerfile - use standalone Whanos image from local copy
                         sh \"\"\"
-                            git clone --depth 1 --branch {{ whanos_git_branch | default('main') }} {{ whanos_git_repo | default('https://github.com/RaresFZ/whanos.git') }} /tmp/whanos-\${BUILD_NUMBER}
-                            docker build -t \${imageName} -f /tmp/whanos-\${BUILD_NUMBER}/images/\${env.LANGUAGE}/Dockerfile.standalone .
-                            rm -rf /tmp/whanos-\${BUILD_NUMBER}
+                            docker build -t \${imageName} -f /var/lib/jenkins/whanos-images/\${env.LANGUAGE}/Dockerfile.standalone .
                         \"\"\"
                     }
                     
@@ -270,54 +267,71 @@ pipeline {
                         writeFile file: 'service.yaml', text: serviceManifest
                         sh 'kubectl apply --validate=false -f service.yaml -n whanos-cicd'
                         
-                        // Create Traefik Middleware for path prefix stripping
-                        def middlewareLines = [
-                            "apiVersion: traefik.containo.us/v1alpha1",
-                            "kind: Middleware",
-                            "metadata:",
-                            "  name: ${jobName}-stripprefix",
-                            "  namespace: whanos-cicd",
-                            "spec:",
-                            "  stripPrefix:",
-                            "    prefixes:",
-                            "      - /${jobName}",
-                        ]
-                        def middlewareManifest = middlewareLines.join('\\n') + '\\n'
+                        // Check if Traefik CRDs are available
+                        def traefikAvailable = sh(
+                            script: 'kubectl get crd middlewares.traefik.containo.us 2>/dev/null',
+                            returnStatus: true
+                        ) == 0
                         
-                        writeFile file: 'middleware.yaml', text: middlewareManifest
-                        sh 'kubectl apply --validate=false -f middleware.yaml -n whanos-cicd'
-                        
-                        // Create Ingress for external access
-                        def firstPort = ports.split(',').findAll { it }[0].trim()
-                        def ingressLines = [
-                            "apiVersion: networking.k8s.io/v1",
-                            "kind: Ingress",
-                            "metadata:",
-                            "  name: ${jobName}",
-                            "  namespace: whanos-cicd",
-                            "  annotations:",
-                            "    traefik.ingress.kubernetes.io/router.entrypoints: web",
-                            "    traefik.ingress.kubernetes.io/router.middlewares: whanos-cicd-${jobName}-stripprefix@kubernetescrd",
-                            "spec:",
-                            "  rules:",
-                            "    - http:",
-                            "        paths:",
-                            "          - path: /${jobName}",
-                            "            pathType: Prefix",
-                            "            backend:",
-                            "              service:",
-                            "                name: ${jobName}",
-                            "                port:",
-                            "                  number: " + firstPort
-                        ]
-                        
-                        def ingressManifest = ingressLines.join('\\n') + '\\n'
-                        
-                        writeFile file: 'ingress.yaml', text: ingressManifest
-                        sh 'kubectl delete ingress ${jobName} -n whanos-cicd --ignore-not-found=true'
-                        sh 'kubectl apply --validate=false -f ingress.yaml -n whanos-cicd'
-                        
-                        echo "Application accessible at: http://localhost:8081/${jobName} or http://<your-ip>:8081/${jobName}"
+                        if (traefikAvailable) {
+                            // Create Traefik Middleware for path prefix stripping
+                            def middlewareLines = [
+                                "apiVersion: traefik.containo.us/v1alpha1",
+                                "kind: Middleware",
+                                "metadata:",
+                                "  name: ${jobName}-stripprefix",
+                                "  namespace: whanos-cicd",
+                                "spec:",
+                                "  stripPrefix:",
+                                "    prefixes:",
+                                "      - /${jobName}"
+                            ]
+                            def middlewareManifest = middlewareLines.join('\\n') + '\\n'
+                            
+                            writeFile file: 'middleware.yaml', text: middlewareManifest
+                            sh 'kubectl apply --validate=false -f middleware.yaml -n whanos-cicd'
+                            
+                            // Create Ingress for external access with Traefik
+                            def firstPort = ports.split(',').findAll { it }[0].trim()
+                            def ingressLines = [
+                                "apiVersion: networking.k8s.io/v1",
+                                "kind: Ingress",
+                                "metadata:",
+                                "  name: ${jobName}",
+                                "  namespace: whanos-cicd",
+                                "  annotations:",
+                                "    traefik.ingress.kubernetes.io/router.entrypoints: web",
+                                "    traefik.ingress.kubernetes.io/router.middlewares: whanos-cicd-${jobName}-stripprefix@kubernetescrd",
+                                "spec:",
+                                "  rules:",
+                                "    - http:",
+                                "        paths:",
+                                "          - path: /${jobName}",
+                                "            pathType: Prefix",
+                                "            backend:",
+                                "              service:",
+                                "                name: ${jobName}",
+                                "                port:",
+                                "                  number: " + firstPort
+                            ]
+                            
+                            def ingressManifest = ingressLines.join('\\n') + '\\n'
+                            
+                            writeFile file: 'ingress.yaml', text: ingressManifest
+                            sh 'kubectl delete ingress ${jobName} -n whanos-cicd --ignore-not-found=true'
+                            sh 'kubectl apply --validate=false -f ingress.yaml -n whanos-cicd'
+                            
+                            echo "Application accessible at: http://localhost:8081/${jobName}"
+                        } else {
+                            // Fallback to NodePort if Traefik is not available
+                            echo "WARNING: Traefik CRDs not found, using NodePort service instead"
+                            sh 'kubectl patch svc ${jobName} -n whanos-cicd -p "{\\\\"spec\\\\":{\\\\"type\\\\":\\\\"NodePort\\\\"}}"'
+                            
+                            sh 'sleep 2'
+                            def nodePort = sh(script: "kubectl get svc ${jobName} -n whanos-cicd -o jsonpath='{.spec.ports[0].nodePort}'", returnStdout: true).trim()
+                            echo "Application accessible at NodePort: \${nodePort}"
+                            echo "Access via: http://localhost:\${nodePort}"
+                        }
                     }
                 }
             }

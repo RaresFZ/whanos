@@ -44,6 +44,23 @@
     group: jenkins
     mode: "0755"
 
+- name: Ensure Whanos images directory exists
+  ansible.builtin.file:
+    path: /var/lib/jenkins/whanos-images
+    state: directory
+    owner: jenkins
+    group: jenkins
+    mode: "0755"
+
+- name: Copy Whanos Dockerfiles to Jenkins
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../images/"
+    dest: /var/lib/jenkins/whanos-images/
+    owner: jenkins
+    group: jenkins
+    mode: "0644"
+    directory_mode: "0755"
+
 - name: Deploy Jenkins Configuration as Code bundle
   ansible.builtin.template:
     src: jenkins.yaml.j2
